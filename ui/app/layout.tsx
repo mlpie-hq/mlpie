@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import Breadcrumb from "@/components/Breadcrumb";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -64,6 +65,7 @@ export default function RootLayout({
             {/* Main content */}
             <main className="flex-1 overflow-auto p-6">
               <div className="max-w-7xl mx-auto">
+                <Breadcrumb />
                 {children}
               </div>
             </main>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from 'react';
+import Link from 'next/link';
 
 // Define source types with their associated colors
 const sourceTypeColors = {
@@ -10,7 +11,7 @@ const sourceTypeColors = {
   "File Upload": { bg: "bg-gray-100", text: "text-gray-800" },
   "MongoDB": { bg: "bg-green-100", text: "text-green-800" },
   "BigQuery": { bg: "bg-yellow-100", text: "text-yellow-800" },
-};
+} as const;
 
 // Dataset data
 const datasets = [
@@ -120,6 +121,7 @@ export default function Datasets() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [activeMenu, setActiveMenu] = useState<number | null>(null);
   const [activeTooltip, setActiveTooltip] = useState<number | null>(null);
+  const [syncPopup, setSyncPopup] = useState<number | null>(null);
   const [filterSource, setFilterSource] = useState<string | null>(null);
 
   const toggleMenu = (datasetId: number) => {
@@ -132,6 +134,13 @@ export default function Datasets() {
 
   const toggleTooltip = (datasetId: number | null) => {
     setActiveTooltip(datasetId);
+  };
+
+  const toggleSyncPopup = (datasetId: number | null, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setSyncPopup(datasetId === syncPopup ? null : datasetId);
   };
 
   // Get unique source types
@@ -250,7 +259,7 @@ export default function Datasets() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredDatasets.map((dataset) => (
               <div key={dataset.id} className="bg-card rounded-lg border border-border shadow-card overflow-hidden hover:shadow-lg transition-shadow duration-300">
-                <div className="p-5">
+                <Link href={`/datasets/${dataset.id}`} className="block p-5">
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex flex-col">
                       <h3 className="text-lg font-semibold text-foreground line-clamp-1">{dataset.name}</h3>
@@ -282,14 +291,15 @@ export default function Datasets() {
                     </svg>
                     <div className="text-xs flex-grow">
                       <div className="flex items-center justify-between">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sourceTypeColors[dataset.source.type].bg} ${sourceTypeColors[dataset.source.type].text}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors].bg} ${sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors].text}`}>
                           {dataset.source.type}
                         </span>
                         {dataset.source.canSync && (
                           <button
-                            className="ml-auto p-1 rounded-full hover:bg-secondary text-muted hover:text-foreground"
+                            className="ml-auto p-1 rounded-full hover:bg-secondary text-muted hover:text-foreground relative"
                             aria-label="Sync now"
                             title="Sync now"
+                            onClick={(e) => toggleSyncPopup(dataset.id, e)}
                           >
                             <svg className="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M21 2v6h-6"></path>
@@ -297,6 +307,22 @@ export default function Datasets() {
                               <path d="M3 22v-6h6"></path>
                               <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
                             </svg>
+                            
+                            {/* Sync Popup */}
+                            {syncPopup === dataset.id && (
+                              <div className="absolute right-0 mt-1 w-48 bg-card rounded-md shadow-dropdown border border-border z-20 text-left py-2">
+                                <div className="px-3 pb-2 text-sm font-medium border-b border-border">Sync Options</div>
+                                <button className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary">
+                                  Sync now
+                                </button>
+                                <button className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary">
+                                  Schedule sync
+                                </button>
+                                <button className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary">
+                                  View sync history
+                                </button>
+                              </div>
+                            )}
                           </button>
                         )}
                       </div>
@@ -304,9 +330,9 @@ export default function Datasets() {
                       <div className="text-muted mt-0.5">Last synced {dataset.source.lastSync}</div>
                     </div>
                     
-                    {/* Source Metadata Tooltip */}
+                    {/* Source Metadata Tooltip - appears immediately */}
                     {activeTooltip === dataset.id && (
-                      <div className="absolute left-0 -bottom-1 transform translate-y-full z-10 w-full bg-card rounded-md shadow-dropdown border border-border p-2 text-xs">
+                      <div className="absolute left-0 top-full transform translate-y-2 z-10 w-full bg-card rounded-md shadow-dropdown border border-border p-2 text-xs">
                         <div className="font-medium mb-1">Source Details</div>
                         {Object.entries(dataset.source.metadata).map(([key, value]) => (
                           <div key={key} className="grid grid-cols-3 gap-1 mb-0.5">
@@ -374,7 +400,7 @@ export default function Datasets() {
                       Analyze
                     </button>
                   </div>
-                </div>
+                </Link>
               </div>
             ))}
           </div>
@@ -399,13 +425,15 @@ export default function Datasets() {
                 {filteredDatasets.map((dataset, index) => (
                   <tr key={dataset.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
                     <td className="px-4 py-3">
-                      <div>
-                        <div className="font-medium text-foreground">{dataset.name}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted">v{dataset.version}</span>
-                          <div className="text-xs text-muted truncate max-w-[200px]">{dataset.description}</div>
+                      <Link href={`/datasets/${dataset.id}`}>
+                        <div>
+                          <div className="font-medium text-foreground hover:underline">{dataset.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted">v{dataset.version}</span>
+                            <div className="text-xs text-muted truncate max-w-[200px]">{dataset.description}</div>
+                          </div>
                         </div>
-                      </div>
+                      </Link>
                     </td>
                     <td className="px-4 py-3">{dataset.type}</td>
                     <td className="px-4 py-3 relative"
@@ -413,14 +441,15 @@ export default function Datasets() {
                         onMouseLeave={() => toggleTooltip(null)}
                     >
                       <div className="flex items-center">
-                        <span className={`mr-2 px-2 py-0.5 rounded-full text-xs font-medium ${sourceTypeColors[dataset.source.type].bg} ${sourceTypeColors[dataset.source.type].text}`}>
+                        <span className={`mr-2 px-2 py-0.5 rounded-full text-xs font-medium ${sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors].bg} ${sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors].text}`}>
                           {dataset.source.type}
                         </span>
                         {dataset.source.canSync && (
                           <button
-                            className="ml-auto p-1 rounded-full hover:bg-secondary text-muted hover:text-foreground"
+                            className="ml-auto p-1 rounded-full hover:bg-secondary text-muted hover:text-foreground relative"
                             aria-label="Sync now"
                             title="Sync now"
+                            onClick={(e) => toggleSyncPopup(dataset.id, e)}
                           >
                             <svg className="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M21 2v6h-6"></path>
@@ -428,6 +457,22 @@ export default function Datasets() {
                               <path d="M3 22v-6h6"></path>
                               <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
                             </svg>
+                            
+                            {/* Sync Popup */}
+                            {syncPopup === dataset.id && (
+                              <div className="absolute right-0 mt-1 w-48 bg-card rounded-md shadow-dropdown border border-border z-20 text-left py-2">
+                                <div className="px-3 pb-2 text-sm font-medium border-b border-border">Sync Options</div>
+                                <button className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary">
+                                  Sync now
+                                </button>
+                                <button className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary">
+                                  Schedule sync
+                                </button>
+                                <button className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary">
+                                  View sync history
+                                </button>
+                              </div>
+                            )}
                           </button>
                         )}
                       </div>
@@ -435,7 +480,7 @@ export default function Datasets() {
                       
                       {/* Source Metadata Tooltip */}
                       {activeTooltip === dataset.id && (
-                        <div className="absolute left-0 top-full z-10 w-64 bg-card rounded-md shadow-dropdown border border-border p-2 text-xs">
+                        <div className="absolute left-0 top-full transform translate-y-2 z-10 w-64 bg-card rounded-md shadow-dropdown border border-border p-2 text-xs">
                           <div className="font-medium mb-1">Source Details</div>
                           {Object.entries(dataset.source.metadata).map(([key, value]) => (
                             <div key={key} className="grid grid-cols-3 gap-1 mb-0.5">
@@ -544,6 +589,15 @@ export default function Datasets() {
           </div>
         )}
       </div>
+
+      {/* Click outside handler for closing sync popup */}
+      {syncPopup !== null && (
+        <div 
+          className="fixed inset-0 z-10" 
+          onClick={() => setSyncPopup(null)}
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 } 

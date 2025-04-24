@@ -124,16 +124,18 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer Area */}
-      <div className="p-4 border-t border-border">
-        <div className="flex items-center">
-          <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-foreground">
-            U
+      <div className="mt-auto p-4 border-t border-gray-200">
+        <Link href="/settings" className="block group -m-4 p-4 rounded-lg hover:bg-gray-100 transition-colors duration-150">
+          <div className="flex items-center gap-4">
+            <div className="h-9 w-9 rounded-full bg-gray-300 flex items-center justify-center text-sm font-semibold text-gray-600">
+              UD
+            </div>
+            <div className="text-left">
+              <p className="text-sm font-medium text-gray-800 group-hover:text-indigo-600">Demo User</p>
+              <p className="text-xs text-gray-500">user@example.com</p>
+            </div>
           </div>
-          <div className="ml-3">
-            <p className="text-sm font-medium">User Name</p>
-            <p className="text-xs text-muted">admin@mlpie.ai</p>
-          </div>
-        </div>
+        </Link>
       </div>
     </aside>
   );
