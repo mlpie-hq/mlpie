@@ -2,6 +2,7 @@
 
 import { useState } from "react"; // Import useState
 import Link from 'next/link'; // Import Link
+import MultiMethodInterface from "../components/MultiMethodInterface"; // Import our new component
 // import Image from "next/image"; // Removed unused import
 
 // Initial project data (will be used as default state)
@@ -56,25 +57,6 @@ const stats = [
   { label: "Total Datasets", value: "37" },
 ];
 
-// Define project types for the dropdown
-const projectTypes = [
-  { id: 'classification', name: 'Classification' },
-  { id: 'regression', name: 'Regression' },
-  { id: 'nlp', name: 'Natural Language Processing' },
-  { id: 'computer_vision', name: 'Computer Vision' },
-  { id: 'time_series', name: 'Time Series' },
-  { id: 'generative_ai', name: 'Generative AI' },
-  { id: 'other', name: 'Other' },
-];
-
-// Define deployment environments
-const deploymentEnvironments = [
-  { id: 'development', name: 'Development' },
-  { id: 'staging', name: 'Staging' },
-  { id: 'production', name: 'Production' },
-  { id: 'none', name: 'None (Training Only)' },
-];
-
 export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   // Initialize projects state with initial data
@@ -83,6 +65,9 @@ export default function Home() {
   // Form state
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
+  // State variables to track project name and description for real-time updates
+  const [projectName, setProjectName] = useState('My Project');
+  const [projectDescription, setProjectDescription] = useState('Project description');
 
   // Function to add a tag from input
   const handleAddTag = () => {
@@ -109,12 +94,14 @@ export default function Home() {
     // Reset form state when opening modal
     setTags([]);
     setTagInput('');
+    setProjectName('My Project');
+    setProjectDescription('Project description');
     setIsModalOpen(true);
   };
 
   const handleCloseModal = () => setIsModalOpen(false);
 
-  // Updated function to add the new project with enhanced fields
+  // Function to add the new project
   const handleCreateProject = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -122,10 +109,6 @@ export default function Home() {
     // Extract form data
     const name = formData.get('projectName') as string;
     const description = formData.get('projectDescription') as string;
-    const projectType = formData.get('projectType') as string;
-    const status = formData.get('status') as string;
-    const deploymentTarget = formData.get('deploymentTarget') as string;
-    const expectedDuration = formData.get('expectedDuration') as string;
     
     // Basic validation
     if (!name) {
@@ -133,20 +116,16 @@ export default function Home() {
       return;
     }
 
-    // Create new project with enhanced fields
+    // Create new project with simplified fields
     const newProject = {
       id: Date.now(),
       name,
-      description,
+      description: description || "",
       lastUpdated: "Just now",
-      status: status || "Inactive",
+      status: "Inactive",
       progress: 0,
       models: 0,
       datasets: 0,
-      // New fields
-      projectType: projectType || "other",
-      deploymentTarget: deploymentTarget || "none",
-      expectedDuration: expectedDuration || "Not specified",
       tags: [...tags],
       createdAt: new Date().toISOString(),
     };
@@ -154,6 +133,93 @@ export default function Home() {
     // Add to projects state
     setProjects([newProject, ...projects]);
     handleCloseModal();
+  };
+
+  // Helper function to generate example code snippets based on project name and description
+  const getExampleCode = () => {
+    // Use the current state variables for project name and description
+    const name = projectName || 'My Project';
+    const description = projectDescription || 'Project description';
+
+    // Format the project name for use in identifiers (kebab-case)
+    const formattedName = name.toLowerCase().replace(/\s+/g, '-');
+
+    // Format the tags as a comma-separated string for CLI
+    const tagsString = tags.length > 0 ? tags.join(',') : 'ml,example';
+    
+    // Format tags as an array for YAML and SDK
+    const tagsYaml = tags.length > 0 
+      ? tags.map(tag => `    - "${tag}"`).join('\n')
+      : '    - "ml"\n    - "example"';
+    
+    const tagsSDK = tags.length > 0 
+      ? `[${tags.map(tag => `"${tag}"`).join(', ')}]`
+      : '["ml", "example"]';
+
+    // YAML example
+    const yamlExample = `apiVersion: mlpie.ai/v1
+kind: Project
+metadata:
+  name: ${formattedName}
+spec:
+  displayName: ${name}
+  description: ${description}
+  tags:
+${tagsYaml}`;
+
+    // CLI example
+    const cliExample = `mlpie projects create --name "${name}" --description "${description}" --tags "${tagsString}"`;
+
+    // SDK (Python) example
+    const sdkExample = `from mlpie import MLPieClient
+
+# Initialize client
+client = MLPieClient()
+
+# Create project
+project = client.projects.create(
+    name="${name}",
+    description="${description}",
+    tags=${tagsSDK}
+)
+
+print(f"Created project with ID: {project.id}")`;
+
+    return { yamlExample, cliExample, sdkExample };
+  };
+
+  // Define form fields for the MultiMethodInterface component
+  const formFields = [
+    {
+      id: 'projectName',
+      name: 'projectName',
+      label: 'Project Name',
+      type: 'text' as const,
+      placeholder: 'e.g., Customer Churn Predictor',
+      required: true,
+      value: projectName,
+      onChange: setProjectName
+    },
+    {
+      id: 'projectDescription',
+      name: 'projectDescription',
+      label: 'Description',
+      type: 'textarea' as const,
+      placeholder: 'A brief description of the project\'s goal',
+      required: false,
+      value: projectDescription,
+      onChange: setProjectDescription
+    }
+  ];
+
+  // Tag handling for the MultiMethodInterface component
+  const tagHandling = {
+    tags,
+    tagInput,
+    setTagInput,
+    handleAddTag,
+    handleRemoveTag,
+    handleTagKeyDown
   };
 
   return (
@@ -264,168 +330,34 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Enhanced Create Project Modal */}
+      {/* Create Project Modal using MultiMethodInterface component */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 m-4 my-8">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-gray-800">Create New Project</h2>
+          <div className="m-4 my-8 relative w-1/2">
+            {/* Close button outside of component for better control of modal */}
+            <div className="absolute right-3 top-3 z-10">
               <button 
                 onClick={handleCloseModal} 
                 className="text-gray-400 hover:text-gray-600" 
                 aria-label="Close"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
               </button>
             </div>
             
-            {/* Enhanced Form */}
-            <form onSubmit={handleCreateProject} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Basic Info - Left Column */}
-                <div className="space-y-4">
-                  {/* Project Name */}
-                  <div>
-                    <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-1">Project Name*</label>
-                    <input 
-                      type="text" 
-                      id="projectName" 
-                      name="projectName" 
-                      required 
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="e.g., Customer Churn Predictor"
-                    />
-                  </div>
-                  
-                  {/* Project Type Dropdown */}
-                  <div>
-                    <label htmlFor="projectType" className="block text-sm font-medium text-gray-700 mb-1">Project Type</label>
-                    <select 
-                      id="projectType" 
-                      name="projectType" 
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      {projectTypes.map(type => (
-                        <option key={type.id} value={type.id}>{type.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  {/* Initial Status */}
-                  <div>
-                    <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">Initial Status</label>
-                    <select 
-                      id="status" 
-                      name="status" 
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="Inactive">Inactive</option>
-                      <option value="Active">Active</option>
-                      <option value="Planning">Planning</option>
-                    </select>
-                  </div>
-                  
-                  {/* Expected Duration */}
-                  <div>
-                    <label htmlFor="expectedDuration" className="block text-sm font-medium text-gray-700 mb-1">Expected Duration</label>
-                    <select 
-                      id="expectedDuration" 
-                      name="expectedDuration" 
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="Less than 1 month">Less than 1 month</option>
-                      <option value="1-3 months">1-3 months</option>
-                      <option value="3-6 months">3-6 months</option>
-                      <option value="6+ months">6+ months</option>
-                    </select>
-                  </div>
-                </div>
-                
-                {/* Additional Info - Right Column */}
-                <div className="space-y-4">
-                  {/* Description */}
-                  <div>
-                    <label htmlFor="projectDescription" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <textarea 
-                      id="projectDescription" 
-                      name="projectDescription"
-                      rows={3} 
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="A brief description of the project's goal"
-                    ></textarea>
-                  </div>
-                  
-                  {/* Target Deployment Environment */}
-                  <div>
-                    <label htmlFor="deploymentTarget" className="block text-sm font-medium text-gray-700 mb-1">Target Deployment Environment</label>
-                    <select 
-                      id="deploymentTarget" 
-                      name="deploymentTarget" 
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      {deploymentEnvironments.map(env => (
-                        <option key={env.id} value={env.id}>{env.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  {/* Tags */}
-                  <div>
-                    <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
-                    <div className="flex">
-                      <input 
-                        type="text" 
-                        id="tagInput" 
-                        value={tagInput}
-                        onChange={(e) => setTagInput(e.target.value)}
-                        onKeyDown={handleTagKeyDown}
-                        className="flex-grow px-3 py-2 border border-gray-300 rounded-l-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                        placeholder="Add a tag"
-                      />
-                      <button 
-                        type="button" 
-                        onClick={handleAddTag}
-                        className="bg-gray-100 px-3 py-2 border border-l-0 border-gray-300 rounded-r-md hover:bg-gray-200"
-                      >
-                        Add
-                      </button>
-                    </div>
-                    {/* Display added tags */}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {tags.map(tag => (
-                        <span key={tag} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center">
-                          {tag}
-                          <button 
-                            type="button"
-                            onClick={() => handleRemoveTag(tag)} 
-                            className="ml-1 text-blue-600 hover:text-blue-800"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Actions */}
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                <button 
-                  type="button" 
-                  onClick={handleCloseModal} 
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit" 
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium"
-                >
-                  Create Project
-                </button>
-              </div>
-            </form>
+            <MultiMethodInterface
+              title="Create New Project"
+              fields={formFields}
+              getExampleCode={getExampleCode}
+              onSubmit={handleCreateProject}
+              tags={tagHandling}
+              submitButtonText="Create Project"
+              yamlInstructions="You can create a project by defining it in YAML and applying it with"
+              cliInstructions="You can create a project using the MLPie command-line interface:"
+              sdkInstructions="You can create a project programmatically using the MLPie Python SDK:"
+            />
           </div>
         </div>
       )}

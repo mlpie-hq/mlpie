@@ -11,9 +11,20 @@ const sourceTypeColors = {
   "File Upload": { bg: "bg-gray-100", text: "text-gray-800" },
   "MongoDB": { bg: "bg-green-100", text: "text-green-800" },
   "BigQuery": { bg: "bg-yellow-100", text: "text-yellow-800" },
+  "Transformation": { bg: "bg-gray-100", text: "text-gray-800" },
 } as const;
 
-// Dataset data
+// Helper function for Dataset Type styling (Copied from detail page)
+const getDatasetTypeClasses = (type: string) => {
+  if (type === "Source") {
+    return "bg-green-100 text-green-800 border border-green-300";
+  } else if (type === "Derived") {
+    return "bg-purple-100 text-purple-800 border border-purple-300";
+  }
+  return "bg-gray-100 text-gray-800 border border-gray-300"; // Fallback
+};
+
+// Dataset data - Updated with Source/Derived types
 const datasets = [
   {
     id: 1,
@@ -21,7 +32,7 @@ const datasets = [
     description: "Cleaned customer demographic data with 25+ attributes for personalization and segmentation analysis.",
     lastUpdated: "1 hour ago",
     status: "Ready",
-    type: "Structured",
+    type: "Source" as const, // Updated type
     rows: 125000,
     size: "48 MB",
     tags: ["customers", "demographics", "production"],
@@ -44,7 +55,8 @@ const datasets = [
     description: "High-resolution product images dataset with multiple angles and lighting conditions for training visual models.",
     lastUpdated: "2 days ago",
     status: "Processing",
-    type: "Image",
+    type: "Derived" as const, // Updated type
+    sourceDatasetIds: ["1"], // Added link to source
     rows: 15700,
     size: "5.2 GB",
     tags: ["images", "products", "retail"],
@@ -67,7 +79,7 @@ const datasets = [
     description: "Annotated dataset of customer support tickets with sentiment and issue classification for training NLP models.",
     lastUpdated: "1 week ago",
     status: "Ready",
-    type: "Text",
+    type: "Source" as const, // Updated type
     rows: 87420,
     size: "156 MB",
     tags: ["nlp", "support", "text"],
@@ -90,7 +102,7 @@ const datasets = [
     description: "Time-series data collected from IoT sensors with temperature, humidity, and pressure readings at 5-minute intervals.",
     lastUpdated: "3 days ago",
     status: "Ready",
-    type: "Time-series",
+    type: "Source" as const, // Updated type
     rows: 250000,
     size: "87 MB",
     tags: ["iot", "time-series", "sensors"],
@@ -107,6 +119,30 @@ const datasets = [
       canSync: false
     }
   },
+  // Add a 5th dataset for demonstration
+  {
+    id: 5,
+    name: "Processed Sensor Data",
+    description: "Sensor readings aggregated and cleaned for anomaly detection modeling.",
+    lastUpdated: "1 day ago",
+    status: "Ready",
+    type: "Derived" as const, // Updated type
+    sourceDatasetIds: ["4"], // Added link to source
+    rows: 248500, // Slightly less after cleaning
+    size: "80 MB",
+    tags: ["iot", "time-series", "processed", "anomaly-detection"],
+    version: "1.0.0",
+    source: { // Example: indicating derived nature, maybe no direct source connection
+      type: "Transformation", // Or similar indicative type
+      location: "Processing Pipeline P-003",
+      lastSync: "1 day ago",
+      metadata: {
+          pipelineId: "p-003",
+          sourceDataset: "Sensor Readings (v1.0.4)"
+      },
+      canSync: false
+     }
+  }
 ];
 
 // Stats cards data
@@ -150,6 +186,9 @@ export default function Datasets() {
   const filteredDatasets = filterSource 
     ? datasets.filter(d => d.source.type === filterSource)
     : datasets;
+
+  // Get unique dataset types (Source/Derived) for filtering - NEW
+  const datasetTypes = Array.from(new Set(datasets.map(d => d.type)));
 
   return (
     <div className="space-y-6">
@@ -205,11 +244,10 @@ export default function Datasets() {
               className="px-3 py-1.5 rounded-md bg-secondary text-foreground text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary"
               aria-label="Filter datasets by type"
             >
-              <option>All Types</option>
-              <option>Structured</option>
-              <option>Image</option>
-              <option>Text</option>
-              <option>Time-series</option>
+              <option value="">All Types</option>
+              {datasetTypes.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
             </select>
             
             {/* Source Filter */}
@@ -262,8 +300,15 @@ export default function Datasets() {
                 <Link href={`/datasets/${dataset.id}`} className="block p-5">
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex flex-col">
-                      <h3 className="text-lg font-semibold text-foreground line-clamp-1">{dataset.name}</h3>
-                      <div className="text-xs text-muted mt-0.5">v{dataset.version}</div>
+                      <div className="flex items-center space-x-2 mb-0.5"> 
+                        <h3 className="text-lg font-semibold text-foreground line-clamp-1">{dataset.name}</h3>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${getDatasetTypeClasses(dataset.type)}`}
+                        >
+                          {dataset.type}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted">v{dataset.version}</div>
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -346,10 +391,6 @@ export default function Datasets() {
                   
                   {/* Dataset Info */}
                   <div className="grid grid-cols-2 gap-2 text-xs mb-4">
-                    <div>
-                      <span className="text-muted">Type:</span>
-                      <span className="ml-1 font-medium">{dataset.type}</span>
-                    </div>
                     <div>
                       <span className="text-muted">Size:</span>
                       <span className="ml-1 font-medium">{dataset.size}</span>
@@ -435,7 +476,13 @@ export default function Datasets() {
                         </div>
                       </Link>
                     </td>
-                    <td className="px-4 py-3">{dataset.type}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${getDatasetTypeClasses(dataset.type)}`}
+                      >
+                        {dataset.type}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 relative"
                         onMouseEnter={() => toggleTooltip(dataset.id)}
                         onMouseLeave={() => toggleTooltip(null)}

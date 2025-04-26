@@ -1,9 +1,146 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Download, Tag, Users, Calendar, Check } from "lucide-react";
+import { Download, ExternalLink, GitBranch, Workflow, Database, Info } from "lucide-react";
+import ReactFlow, { 
+    Controls, 
+    Background, 
+    MiniMap, 
+    useNodesState, 
+    useEdgesState, 
+    addEdge, 
+    Position, 
+    MarkerType,
+    Node,
+    Edge,
+    Connection
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+
+// --- Type Definitions ---
+interface Pipeline {
+  id: string;
+  name: string;
+}
+
+interface LineageInput {
+  datasetId: string;
+  version: string;
+}
+
+interface LineageDetails {
+  sourceType?: string;
+  location?: string;
+  table?: string;
+  description?: string;
+}
+
+interface LineageInfo {
+  type: string; // e.g., "Source Origin", "Transformation"
+  createdBy: string; // e.g., "Direct Ingestion", "Pipeline"
+  pipelineId?: string;
+  pipelineRunId?: string;
+  jobName?: string;
+  inputs?: LineageInput[];
+  details?: LineageDetails;
+}
+
+// Added specific types for Dataset properties
+interface SourceMetadata {
+  database?: string;
+  table?: string;
+  schema?: string;
+  region?: string;
+  prefix?: string;
+  fileTypes?: string;
+  endpoint?: string;
+  filters?: string;
+  auth?: string;
+  format?: string;
+  uploaded?: string;
+  encoding?: string;
+  pipelineId?: string;
+  sourceDataset?: string;
+}
+
+interface SourceInfo {
+  type: string; // Consider using a union type if known values
+  location: string;
+  lastSync: string;
+  metadata: SourceMetadata;
+  canSync: boolean;
+}
+
+interface SchemaField {
+  name: string;
+  type: string;
+  nullable: boolean;
+  description: string;
+}
+
+interface UsageInfo {
+  id: string;
+  name: string;
+  type: string; // e.g., "Classification", "ETL"
+  lastRun: string;
+}
+
+interface HistoryEntry {
+  version: string;
+  date: string;
+  changes: string;
+}
+
+interface StatsDistribution {
+  gender?: Record<string, number>;
+  ageBrackets?: Record<string, number>;
+  resolution?: Record<string, number>;
+  fileType?: Record<string, number>;
+  usage?: Array<{ month: string; value: number }>;
+}
+
+interface StatsInfo {
+  quality: number;
+  completeness: number;
+  uniqueness: number;
+  consistency: number;
+  distribution: StatsDistribution;
+}
+
+interface Dataset {
+  id: string;
+  name: string;
+  description?: string;
+  lastUpdated?: string;
+  status?: string;
+  type: "Source" | "Derived";
+  sourceDatasetIds?: string[];
+  rows?: number;
+  size?: string;
+  tags?: string[];
+  version: string;
+  source?: SourceInfo; // Use specific type
+  schema?: SchemaField[]; // Use specific type
+  usedIn?: UsageInfo[]; // Use specific type
+  history?: HistoryEntry[]; // Use specific type
+  stats?: StatsInfo; // Use specific type
+  lineage?: LineageInfo;
+}
+
+interface DatasetNodeData {
+  id: string;
+  label: string;
+  version: string;
+}
+
+interface StepNodeData {
+  label: string;
+  pipelineId?: string;
+  pipelineName?: string;
+}
+// --- End Type Definitions ---
 
 // Source type colors (reused from datasets page)
 const sourceTypeColors = {
@@ -15,15 +152,22 @@ const sourceTypeColors = {
   "BigQuery": { bg: "bg-yellow-100", text: "text-yellow-800" },
 } as const;
 
+// Mock Pipeline Data
+const mockPipelines: Pipeline[] = [
+  { id: "p1", name: "Customer Enrichment Pipeline" },
+  { id: "p2", name: "Image Augmentation Pipeline" },
+  { id: "p3", name: "NLP Preprocessing Pipeline" }
+];
+
 // Mock dataset for this demo (in a real app, this would come from an API)
-const mockDatasets = [
+const mockDatasets: Dataset[] = [
   {
     id: "1",
     name: "Customer Demographics",
     description: "Cleaned customer demographic data with 25+ attributes for personalization and segmentation analysis.",
     lastUpdated: "1 hour ago",
     status: "Ready",
-    type: "Structured",
+    type: "Source" as const,
     rows: 125000,
     size: "48 MB",
     tags: ["customers", "demographics", "production"],
@@ -88,6 +232,15 @@ const mockDatasets = [
           { month: 'Dec', value: 132 }
         ]
       }
+    },
+    lineage: {
+      type: "Source Origin",
+      createdBy: "Direct Ingestion",
+      details: {
+        sourceType: "PostgreSQL",
+        location: "analytics-db.mlpie.ai",
+        table: "user_demographics"
+      }
     }
   },
   {
@@ -96,7 +249,8 @@ const mockDatasets = [
     description: "High-resolution product images dataset with multiple angles and lighting conditions for training visual models.",
     lastUpdated: "2 days ago",
     status: "Processing",
-    type: "Image",
+    type: "Derived" as const,
+    sourceDatasetIds: ["1"],
     rows: 15700,
     size: "5.2 GB",
     tags: ["images", "products", "retail"],
@@ -152,6 +306,68 @@ const mockDatasets = [
           { month: 'Dec', value: 60 }
         ]
       }
+    },
+    lineage: {
+      type: "Transformation",
+      createdBy: "Pipeline",
+      pipelineId: "p2",
+      jobName: "augment-images-v2",
+      inputs: [
+        { datasetId: "1", version: "2.0.0" }
+      ],
+      details: {
+        description: "Generated augmented images based on customer segments."
+      }
+    }
+  },
+  {
+    id: "support-tickets-raw",
+    name: "Support Tickets",
+    type: "Source" as const,
+    version: "3.0.0-beta",
+    lineage: { type: "Source Origin", createdBy: "Direct Ingestion", details: { sourceType: "API Import", /*...*/ } }
+  },
+  {
+    id: "3",
+    name: "Sentiment Scores",
+    type: "Derived" as const,
+    version: "1.0.0",
+    sourceDatasetIds: ["support-tickets-raw"],
+    tags: ["nlp", "sentiment", "derived"],
+    rows: 87420,
+    size: "12 MB",
+    status: "Ready",
+    lastUpdated: "3 hours ago",
+    lineage: {
+      type: "Transformation",
+      createdBy: "Pipeline",
+      pipelineId: "p3",
+      jobName: "calculate-sentiment",
+      inputs: [{ datasetId: "support-tickets-raw", version: "3.0.0-beta" }],
+      details: { description: "Calculated sentiment scores for support tickets." }
+    }
+  },
+  {
+    id: "4",
+    name: "Enriched Customer Data",
+    type: "Derived" as const,
+    version: "1.0.0",
+    sourceDatasetIds: ["1", "3"],
+    tags: ["customers", "enriched", "derived"],
+    rows: 125000,
+    size: "55 MB",
+    status: "Ready",
+    lastUpdated: "1 hour ago",
+    lineage: {
+      type: "Transformation",
+      createdBy: "Pipeline",
+      pipelineId: "p1",
+      jobName: "join-customer-sentiment",
+      inputs: [
+        { datasetId: "1", version: "2.1.0" },
+        { datasetId: "3", version: "1.0.0" }
+      ],
+      details: { description: "Joined customer demographics with sentiment scores." }
     }
   }
 ];
@@ -384,11 +600,153 @@ function getStatusClass(status: string) {
   }
 }
 
+// Helper function for Dataset Type styling
+const getDatasetTypeClasses = (type: string) => {
+  if (type === "Source") {
+    return "bg-green-100 text-green-800 border border-green-300";
+  } else if (type === "Derived") {
+    return "bg-purple-100 text-purple-800 border border-purple-300";
+  }
+  return "bg-gray-100 text-gray-800 border border-gray-300"; // Fallback
+};
+
+// --- React Flow Graph Component --- 
+
+// Custom Node Types (Use specific data types)
+const DatasetNode = ({ data }: { data: DatasetNodeData }) => (
+  <div className="p-2 border border-blue-300 rounded bg-blue-50 shadow-sm text-xs"><Link href={`/datasets/${data.id}`} className="font-medium text-blue-700 hover:underline"><Database className="w-3 h-3 inline-block mr-1" /> {data.label}</Link><div className="text-blue-600">(v{data.version})</div></div>
+);
+
+const StepNode = ({ data }: { data: StepNodeData }) => (
+  <div className="p-2 border border-purple-300 rounded bg-purple-50 shadow-sm text-xs"><Link href={`/pipelines/${data.pipelineId}/steps/${data.label}`} className="font-medium text-purple-700 hover:underline"><Workflow className="w-3 h-3 inline-block mr-1" /> {data.label}</Link><div className="text-purple-600">(Pipeline: {data.pipelineName})</div></div>
+);
+
+const nodeTypes = { dataset: DatasetNode, step: StepNode };
+
+function DatasetLineageGraph({ currentDataset, allDatasets, allPipelines }: { 
+    currentDataset: Dataset; 
+    allDatasets: Dataset[]; 
+    allPipelines: Pipeline[]; 
+}) {
+
+  const initialNodes = useMemo(() => {
+    const nodes: Node<DatasetNodeData | StepNodeData>[] = [];
+    const position = { x: 250, y: 150 };
+    const parentPosition = { x: 50, y: 50 };
+    const inputPosition = { x: 50, y: 250 };
+    let inputYOffset = 0;
+
+    // 1. Current Dataset Node
+    nodes.push({
+      id: currentDataset.id,
+      type: 'dataset',
+      data: { id: currentDataset.id, label: currentDataset.name, version: currentDataset.version },
+      position,
+      sourcePosition: Position.Left,
+      targetPosition: Position.Right,
+      style: { fontWeight: 'bold', border: '2px solid #2563eb' }
+    });
+
+    // 2. If Derived, add the generating Step Node and Input Dataset Nodes
+    if (currentDataset.type === 'Derived' && currentDataset.lineage?.inputs) {
+        const pipeline = allPipelines.find(p => p.id === currentDataset.lineage!.pipelineId);
+        const stepId = `${currentDataset.lineage.pipelineId}-${currentDataset.lineage.jobName || 'step'}`;
+
+        // Step Node
+        nodes.push({
+            id: stepId,
+            type: 'step',
+            data: { 
+                label: currentDataset.lineage.jobName || 'Unknown Step', 
+                pipelineId: currentDataset.lineage.pipelineId,
+                pipelineName: pipeline?.name || 'Unknown Pipeline'
+            },
+            position: parentPosition, 
+            sourcePosition: Position.Right,
+            targetPosition: Position.Left   
+        });
+
+        // Input Dataset Nodes (Use LineageInput type here)
+        currentDataset.lineage.inputs.forEach((input: LineageInput) => {
+            const inputDs = allDatasets.find(d => d.id === input.datasetId);
+            nodes.push({
+                id: input.datasetId,
+                type: 'dataset',
+                data: { 
+                    id: input.datasetId,
+                    label: inputDs?.name || input.datasetId, 
+                    version: input.version 
+                },
+                position: { x: inputPosition.x, y: inputPosition.y + inputYOffset },
+                sourcePosition: Position.Right 
+            });
+            inputYOffset += 100;
+        });
+    }
+    
+    return nodes;
+  }, [currentDataset, allDatasets, allPipelines]);
+
+  const initialEdges = useMemo(() => {
+      const edges: Edge[] = [];
+      if (currentDataset.type === 'Derived' && currentDataset.lineage?.inputs) {
+        const stepId = `${currentDataset.lineage.pipelineId}-${currentDataset.lineage.jobName || 'step'}`;
+        
+        edges.push({ 
+            id: `e-${stepId}-to-${currentDataset.id}`,
+            source: stepId, 
+            target: currentDataset.id, 
+            markerEnd: { type: MarkerType.ArrowClosed },
+            animated: true
+        });
+
+        // Use LineageInput type here
+        currentDataset.lineage.inputs.forEach((input: LineageInput) => {
+             edges.push({ 
+                id: `e-${input.datasetId}-to-${stepId}`,
+                source: input.datasetId, 
+                target: stepId, 
+                markerEnd: { type: MarkerType.ArrowClosed }
+            });
+        });
+      }
+      return edges;
+  }, [currentDataset]);
+
+  // Ignore setNodes unused warning, keep setEdges for onConnect
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes); 
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  const onConnect = useCallback((params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
+
+  return (
+    <div style={{ height: '400px' }} className="border rounded-md overflow-hidden bg-secondary/30">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        nodeTypes={nodeTypes}
+        fitView
+        attributionPosition="top-right"
+      >
+        <Controls />
+        <MiniMap />
+        <Background gap={12} size={1} />
+      </ReactFlow>
+    </div>
+  );
+}
+
+// --- End React Flow Component ---
+
 export default function DatasetDetail() {
   const params = useParams();
   const datasetId = params.id as string;
   
-  // Find the dataset by ID
+  // Use Dataset type
   const dataset = mockDatasets.find(d => d.id === datasetId);
   
   // Tabs for dataset details
@@ -410,17 +768,29 @@ export default function DatasetDetail() {
     );
   }
 
+  // Define a default style for source types if undefined
+  const defaultSourceStyle = { bg: 'bg-gray-100', text: 'text-gray-800' };
+
   return (
     <div className="space-y-6">
       {/* Dataset header */}
       <div className="flex flex-col space-y-4">
         <div className="flex justify-between items-start">
           <div>
-            <h1 className="text-2xl font-semibold">{dataset.name}</h1>
+            <div className="flex items-center space-x-3 mb-1"> {/* Wrap title and type */}
+              <h1 className="text-2xl font-semibold">{dataset.name}</h1>
+              {dataset.type && ( // Display dataset type badge
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${getDatasetTypeClasses(dataset.type)}`}
+                >
+                  {dataset.type}
+                </span>
+              )}
+            </div>
             <div className="flex items-center space-x-2 mt-1">
               <span className="text-muted mr-2">Version {dataset.version}</span>
               <span
-                className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClass(dataset.status)}`}
+                className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClass(dataset.status ?? '')}`}
               >
                 {dataset.status}
               </span>
@@ -451,7 +821,7 @@ export default function DatasetDetail() {
         
         {/* Tags */}
         <div className="flex flex-wrap gap-1.5">
-          {dataset.tags.map((tag, index) => (
+          {(dataset.tags ?? []).map((tag, index) => (
             <span 
               key={index} 
               className="px-2.5 py-0.5 bg-secondary text-secondary-foreground rounded-full text-xs"
@@ -505,6 +875,19 @@ export default function DatasetDetail() {
             )}
           </button>
           <button
+            onClick={() => setActiveTab('lineage')}
+            className={`py-2 px-1 text-sm font-medium relative ${
+              activeTab === 'lineage' 
+                ? 'text-foreground' 
+                : 'text-muted hover:text-foreground'
+            }`}
+          >
+            Lineage
+            {activeTab === 'lineage' && (
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-primary"></span>
+            )}
+          </button>
+          <button
             onClick={() => setActiveTab('history')}
             className={`py-2 px-1 text-sm font-medium relative ${
               activeTab === 'history' 
@@ -533,7 +916,7 @@ export default function DatasetDetail() {
                 <div className="grid grid-cols-2 gap-y-4 text-sm">
                   <div>
                     <div className="text-muted mb-1">Type</div>
-                    <div className="font-medium">{dataset.type}</div>
+                    <div className="font-medium">{dataset.type || 'N/A'}</div>
                   </div>
                   <div>
                     <div className="text-muted mb-1">Size</div>
@@ -541,7 +924,7 @@ export default function DatasetDetail() {
                   </div>
                   <div>
                     <div className="text-muted mb-1">Records</div>
-                    <div className="font-medium">{dataset.rows.toLocaleString()}</div>
+                    <div className="font-medium">{dataset.rows?.toLocaleString() ?? 'N/A'}</div>
                   </div>
                   <div>
                     <div className="text-muted mb-1">Last Updated</div>
@@ -550,7 +933,7 @@ export default function DatasetDetail() {
                   <div>
                     <div className="text-muted mb-1">Status</div>
                     <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClass(dataset.status)}`}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClass(dataset.status ?? '')}`}
                     >
                       {dataset.status}
                     </span>
@@ -559,6 +942,27 @@ export default function DatasetDetail() {
                     <div className="text-muted mb-1">Version</div>
                     <div className="font-medium">{dataset.version}</div>
                   </div>
+                  {/* Source Dataset Links (Conditional) - Updated map */}
+                  {dataset.type === 'Derived' && dataset.sourceDatasetIds && dataset.sourceDatasetIds.length > 0 && (
+                    <div className="col-span-2 mt-2">
+                      <div className="text-muted mb-1">Derived From</div>
+                      <div className="flex flex-wrap gap-2">
+                        {dataset.sourceDatasetIds.map((sourceId: string) => {
+                          const sourceName = mockDatasets.find(d => d.id === sourceId)?.name;
+                          return sourceName ? (
+                            <Link
+                              key={sourceId}
+                              href={`/datasets/${sourceId}`}
+                              className="text-primary hover:underline flex items-center text-sm bg-primary/10 px-2 py-1 rounded"
+                            >
+                              <ExternalLink className="w-3 h-3 mr-1" />
+                              {sourceName}
+                            </Link>
+                          ) : null;
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -566,10 +970,10 @@ export default function DatasetDetail() {
               <div className="bg-card border border-border rounded-lg p-5 shadow-card">
                 <h3 className="text-lg font-medium mb-4">Data Quality Assessment</h3>
                 <div className="flex flex-wrap justify-between items-center gap-4">
-                  <GaugeChart value={dataset.stats.quality} title="Overall Quality" />
-                  <GaugeChart value={dataset.stats.completeness} title="Completeness" />
-                  <GaugeChart value={dataset.stats.uniqueness} title="Uniqueness" />
-                  <GaugeChart value={dataset.stats.consistency} title="Consistency" />
+                  <GaugeChart value={dataset.stats?.quality ?? 0} title="Overall Quality" />
+                  <GaugeChart value={dataset.stats?.completeness ?? 0} title="Completeness" />
+                  <GaugeChart value={dataset.stats?.uniqueness ?? 0} title="Uniqueness" />
+                  <GaugeChart value={dataset.stats?.consistency ?? 0} title="Consistency" />
                 </div>
               </div>
               
@@ -587,7 +991,7 @@ export default function DatasetDetail() {
                   <table className="w-full text-sm">
                     <thead className="bg-secondary/50">
                       <tr>
-                        {dataset.schema.slice(0, 5).map((col) => (
+                        {(dataset.schema?.slice(0, 5) ?? []).map((col) => (
                           <th key={col.name} className="px-3 py-2 text-left font-medium text-foreground">
                             {col.name}
                           </th>
@@ -595,10 +999,9 @@ export default function DatasetDetail() {
                       </tr>
                     </thead>
                     <tbody>
-                      {/* Sample rows */}
                       {[1, 2, 3, 4].map((row) => (
                         <tr key={row} className={`border-t border-border ${row % 2 === 0 ? 'bg-secondary/20' : ''}`}>
-                          {dataset.schema.slice(0, 5).map((col, i) => (
+                          {(dataset.schema?.slice(0, 5) ?? []).map((col, i) => (
                             <td key={`${row}-${col.name}`} className="px-3 py-2 text-foreground">
                               {/* This is mock data - in a real app this would be actual data */}
                               {col.type === 'UUID' ? `${col.name.charAt(0)}${row}e2d5f-${i}${row}ab` : 
@@ -612,32 +1015,32 @@ export default function DatasetDetail() {
                     </tbody>
                   </table>
                 </div>
-                <div className="text-xs text-muted mt-2">Showing 4 of {dataset.rows.toLocaleString()} records</div>
+                <div className="text-xs text-muted mt-2">Showing 4 of {dataset.rows?.toLocaleString() ?? 'N/A'} records</div>
               </div>
               
               {/* Data Distribution Card - NEW */}
               <div className="bg-card border border-border rounded-lg p-5 shadow-card">
                 <h3 className="text-lg font-medium mb-4">Data Distribution</h3>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {dataset.id === "1" && dataset.stats.distribution.gender && dataset.stats.distribution.ageBrackets ? (
+                  {dataset.id === "1" && dataset.stats?.distribution.gender && dataset.stats?.distribution.ageBrackets ? (
                     <>
                       <DonutChart 
-                        data={dataset.stats.distribution.gender} 
+                        data={dataset.stats?.distribution.gender} 
                         title="Gender Distribution" 
                       />
                       <BarChart 
-                        data={dataset.stats.distribution.ageBrackets} 
+                        data={dataset.stats?.distribution.ageBrackets} 
                         title="Age Distribution" 
                       />
                     </>
-                  ) : dataset.id === "2" && dataset.stats.distribution.resolution && dataset.stats.distribution.fileType ? (
+                  ) : dataset.id === "2" && dataset.stats?.distribution.resolution && dataset.stats?.distribution.fileType ? (
                     <>
                       <DonutChart 
-                        data={dataset.stats.distribution.resolution} 
+                        data={dataset.stats?.distribution.resolution} 
                         title="Resolution" 
                       />
                       <DonutChart 
-                        data={dataset.stats.distribution.fileType} 
+                        data={dataset.stats?.distribution.fileType} 
                         title="File Types" 
                       />
                     </>
@@ -652,24 +1055,29 @@ export default function DatasetDetail() {
               <div className="bg-card border border-border rounded-lg p-5 shadow-card">
                 <h3 className="text-lg font-medium mb-4">Source Information</h3>
                 <div className="mb-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sourceTypeColors[dataset.source.type].bg} ${sourceTypeColors[dataset.source.type].text}`}>
-                    {dataset.source.type}
-                  </span>
+                  {(() => {
+                     const sourceStyles = dataset.source?.type ? sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors] : defaultSourceStyle;
+                     return (
+                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sourceStyles.bg} ${sourceStyles.text}`}>
+                         {dataset.source?.type ?? 'Unknown'}
+                       </span>
+                     );
+                  })()}
                 </div>
                 <div className="text-sm space-y-3">
                   <div>
                     <div className="text-muted mb-1">Location</div>
-                    <div className="font-medium break-all">{dataset.source.location}</div>
+                    <div className="font-medium break-all">{dataset.source?.location}</div>
                   </div>
                   <div>
                     <div className="text-muted mb-1">Last Synced</div>
-                    <div className="font-medium">{dataset.source.lastSync}</div>
+                    <div className="font-medium">{dataset.source?.lastSync}</div>
                   </div>
                   
                   {/* Source Metadata */}
                   <div className="pt-3 border-t border-border mt-3">
                     <div className="text-muted mb-2">Source Details</div>
-                    {Object.entries(dataset.source.metadata).map(([key, value]) => (
+                    {Object.entries(dataset.source?.metadata || {}).map(([key, value]) => (
                       <div key={key} className="grid grid-cols-3 gap-1 mb-1 text-sm">
                         <span className="text-muted capitalize">{key}:</span>
                         <span className="col-span-2 font-medium">{value as string}</span>
@@ -679,7 +1087,7 @@ export default function DatasetDetail() {
                 </div>
                 
                 {/* Sync Button */}
-                {dataset.source.canSync && (
+                {dataset.source?.canSync && (
                   <button className="mt-4 w-full bg-secondary hover:bg-secondary/80 text-secondary-foreground px-3 py-2 rounded-md flex items-center justify-center text-sm">
                     <svg className="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 2v6h-6"></path>
@@ -695,10 +1103,10 @@ export default function DatasetDetail() {
               {/* Usage Trend Card - NEW */}
               <div className="bg-card border border-border rounded-lg p-5 shadow-card">
                 <h3 className="text-lg font-medium mb-4">Usage Trend</h3>
-                {dataset.stats.distribution.usage && (
+                {dataset.stats?.distribution.usage && (
                   <>
                     <LineChart 
-                      data={dataset.stats.distribution.usage}
+                      data={dataset.stats?.distribution.usage}
                       title="Monthly Usage" 
                     />
                     <div className="text-xs text-muted text-center mt-2">Number of model runs using this dataset</div>
@@ -712,21 +1120,21 @@ export default function DatasetDetail() {
                 <div className="space-y-3 text-sm">
                   <div>
                     <div className="text-muted mb-1">Used in Models</div>
-                    <div className="font-medium">{dataset.usedIn.filter(u => u.type !== 'ETL').length} models</div>
+                    <div className="font-medium">{(dataset.usedIn?.filter(u => u.type !== 'ETL') ?? []).length} models</div>
                   </div>
                   <div>
                     <div className="text-muted mb-1">Used in Pipelines</div>
-                    <div className="font-medium">{dataset.usedIn.filter(u => u.type === 'ETL').length} pipelines</div>
+                    <div className="font-medium">{(dataset.usedIn?.filter(u => u.type === 'ETL') ?? []).length} pipelines</div>
                   </div>
                   <div>
                     <div className="text-muted mb-1">Version History</div>
-                    <div className="font-medium">{dataset.history.length} versions</div>
+                    <div className="font-medium">{dataset.history?.length ?? 0} versions</div>
                   </div>
                 </div>
                 
                 <div className="mt-4 pt-4 border-t border-border">
                   <h4 className="font-medium text-sm mb-2">Most Recent Usage</h4>
-                  {dataset.usedIn.slice(0, 2).map((usage) => (
+                  {(dataset.usedIn?.slice(0, 2) ?? []).map((usage) => (
                     <div key={usage.id} className="flex items-center mb-2 p-2 bg-secondary/20 rounded-md">
                       <div className="mr-3 p-1.5 rounded-md bg-primary/10">
                         {usage.type === 'Classification' || usage.type === 'Image Classification' ? (
@@ -775,7 +1183,7 @@ export default function DatasetDetail() {
           <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
             <div className="p-5 border-b border-border">
               <h3 className="text-lg font-medium">Dataset Schema</h3>
-              <p className="text-sm text-muted mt-1">This dataset contains {dataset.schema.length} fields</p>
+              <p className="text-sm text-muted mt-1">This dataset contains {dataset.schema?.length ?? 0} fields</p>
             </div>
             
             <table className="w-full text-sm">
@@ -788,7 +1196,7 @@ export default function DatasetDetail() {
                 </tr>
               </thead>
               <tbody>
-                {dataset.schema.map((field, index) => (
+                {(dataset.schema ?? []).map((field, index) => (
                   <tr key={field.name} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
                     <td className="px-5 py-3 font-medium">{field.name}</td>
                     <td className="px-5 py-3">
@@ -814,7 +1222,7 @@ export default function DatasetDetail() {
             <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
               <div className="p-5 border-b border-border">
                 <h3 className="text-lg font-medium">Models and Pipelines Using This Dataset</h3>
-                <p className="text-sm text-muted mt-1">This dataset is used in {dataset.usedIn.length} models and pipelines</p>
+                <p className="text-sm text-muted mt-1">This dataset is used in {dataset.usedIn?.length ?? 0} models and pipelines</p>
               </div>
               
               <table className="w-full text-sm">
@@ -827,7 +1235,7 @@ export default function DatasetDetail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {dataset.usedIn.map((item, index) => (
+                  {(dataset.usedIn ?? []).map((item, index) => (
                     <tr key={item.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
                       <td className="px-5 py-3 font-medium">{item.name}</td>
                       <td className="px-5 py-3">
@@ -878,9 +1286,9 @@ export default function DatasetDetail() {
               
               {/* Usage Trend Chart - UPDATED */}
               <div className="h-64 p-4 border border-border rounded-lg">
-                {dataset.stats.distribution.usage && (
+                {dataset.stats?.distribution.usage && (
                   <LineChart 
-                    data={dataset.stats.distribution.usage}
+                    data={dataset.stats?.distribution.usage}
                     title="Monthly Usage Trend" 
                     className="h-full"
                   />
@@ -944,6 +1352,129 @@ export default function DatasetDetail() {
           </div>
         )}
         
+        {/* Lineage Tab */}
+        {activeTab === 'lineage' && (
+          <div className="bg-card border border-border rounded-lg p-6 shadow-card">
+            <h3 className="text-xl font-semibold mb-6">Data Lineage</h3>
+
+            {/* Source Dataset Text Display */}
+            {dataset.type === 'Source' && dataset.lineage && (
+              <div className="space-y-4">
+                <div className="flex items-center p-4 rounded-md bg-green-50 border border-green-200">
+                  <Info className="w-5 h-5 text-green-600 mr-3 flex-shrink-0" />
+                  <p className="text-sm text-green-800">
+                    <strong className="font-medium">Source Dataset:</strong> This dataset is an original source, directly ingested via {dataset.lineage.details?.sourceType || 'unknown mechanism'}.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Derived Dataset Text Display */}
+            {dataset.type === 'Derived' && dataset.lineage && (
+              <div className="space-y-6">
+                <div className="border border-border rounded-lg p-4">
+                  <h4 className="text-md font-medium mb-3 flex items-center">
+                    <Workflow className="w-4 h-4 mr-2 text-primary" />
+                    Generated By
+                  </h4>
+                  <div className="text-sm space-y-2">
+                    <p>
+                      <strong className="text-muted w-24 inline-block">Process:</strong>
+                      {dataset.lineage.createdBy === 'Pipeline' ? 'Pipeline Run' : dataset.lineage.createdBy}
+                    </p>
+                    {dataset.lineage.pipelineId && (
+                      <p>
+                        <strong className="text-muted w-24 inline-block">Pipeline:</strong>
+                        <Link href={`/pipelines/${dataset.lineage.pipelineId}`} className="text-primary hover:underline font-medium">
+                          {(mockPipelines.find(p => p.id === dataset.lineage.pipelineId)?.name || dataset.lineage.pipelineId)}
+                        </Link>
+                      </p>
+                    )}
+                    {dataset.lineage.jobName && (
+                      <p>
+                        <strong className="text-muted w-24 inline-block">Step:</strong>
+                        {(dataset.lineage.pipelineId && dataset.lineage.jobName) ? (
+                          <Link href={`/pipelines/${dataset.lineage.pipelineId}/steps/${dataset.lineage.jobName}`} className="font-mono bg-secondary px-1.5 py-0.5 rounded text-xs text-primary hover:underline">
+                            {dataset.lineage.jobName}
+                          </Link>
+                        ) : (
+                          <span className="font-mono bg-secondary px-1.5 py-0.5 rounded text-xs">{dataset.lineage.jobName}</span>
+                        )}
+                      </p>
+                    )}
+                    {dataset.lineage.pipelineRunId && (
+                      <p>
+                        <strong className="text-muted w-24 inline-block">Run ID:</strong>
+                        {dataset.lineage.pipelineRunId}
+                      </p>
+                    )}
+                    {dataset.lineage.details?.description && (
+                      <p>
+                        <strong className="text-muted w-24 inline-block">Description:</strong>
+                        {dataset.lineage.details.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border border-border rounded-lg p-4">
+                  <h4 className="text-md font-medium mb-3 flex items-center">
+                    <Database className="w-4 h-4 mr-2 text-primary" />
+                    Inputs Used
+                  </h4>
+                  <div className="space-y-3">
+                    {dataset.lineage.inputs && dataset.lineage.inputs.length > 0 ? (
+                      dataset.lineage.inputs.map((input: LineageInput) => {
+                        const inputDataset = mockDatasets.find(d => d.id === input.datasetId);
+                        return (
+                          <div key={input.datasetId} className="flex items-center justify-between p-2 rounded bg-secondary/50">
+                            <div className="flex items-center">
+                              <Database className="w-4 h-4 mr-2 text-muted" />
+                              <div>
+                                <Link href={`/datasets/${input.datasetId}`} className="text-sm font-medium text-primary hover:underline">
+                                  {inputDataset?.name || input.datasetId}
+                                </Link>
+                              </div>
+                            </div>
+                            <span className="text-xs text-muted bg-secondary px-1.5 py-0.5 rounded">
+                              Version: {input.version}
+                            </span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="text-sm text-muted">(No input datasets specified in lineage)</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Visual Lineage Graph */}
+                <div className="mt-8 pt-6 border-t border-border">
+                  <h4 className="text-md font-medium mb-3 flex items-center">
+                    <GitBranch className="w-4 h-4 mr-2 text-primary" />
+                    Visual Lineage Graph
+                  </h4>
+                  <DatasetLineageGraph 
+                     currentDataset={dataset} 
+                     allDatasets={mockDatasets} 
+                     allPipelines={mockPipelines} 
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Fallback for missing lineage data */}
+            { !dataset.lineage && (
+              <div className="flex items-center p-4 rounded-md bg-yellow-50 border border-yellow-200">
+                <Info className="w-5 h-5 text-yellow-600 mr-3 flex-shrink-0" />
+                <p className="text-sm text-yellow-800">
+                  <strong className="font-medium">Lineage Unavailable:</strong> Lineage information is not available for this dataset.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+        
         {/* History Tab */}
         {activeTab === 'history' && (
           <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
@@ -958,7 +1489,7 @@ export default function DatasetDetail() {
               
               {/* Timeline items */}
               <div className="relative z-10">
-                {dataset.history.map((version, index) => (
+                {(dataset.history ?? []).map((version, index) => (
                   <div key={version.version} className="flex p-5 border-t border-border">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${index === 0 ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground'}`}>
                       <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -976,7 +1507,7 @@ export default function DatasetDetail() {
                           </span>
                         )}
                       </div>
-                      <div className="text-sm text-muted mb-2">{version.date}</div>
+                      <div className="text-sm text-muted mb-2">{formatDate(version.date)}</div>
                       <p className="text-sm">{version.changes}</p>
                       
                       {index !== 0 && (

@@ -3,6 +3,7 @@
 import { useParams } from 'next/navigation';
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil } from 'lucide-react';
 
 // Temporary: Import or copy the initialProjects data structure for lookup
 // In a real app, you'd fetch this data based on the ID
@@ -15,7 +16,15 @@ const initialProjects = [
     status: "Active",
     progress: 85,
     models: 3,
-    datasets: 2,
+    datasets: [
+      { id: 'ds-001', name: 'Customer Transactions (Raw)', recordCount: 1250000, type: 'Source', lastUpdated: '5 days ago' },
+      { id: 'ds-002', name: 'Churn Features (Processed)', recordCount: 1100000, type: 'Derived', lastUpdated: '2 days ago' }
+    ],
+    environments: [
+      { id: 'dev', name: 'Development', status: 'Synced', deployedVersion: 'v1.2.1-beta', cluster: 'dev-cluster', lastDeployed: '15 mins ago' },
+      { id: 'staging', name: 'Staging', status: 'Synced', deployedVersion: 'v1.2.0', cluster: 'staging-cluster', lastDeployed: '2 hours ago' },
+      { id: 'prod', name: 'Production', status: 'Error', deployedVersion: 'v1.1.5', cluster: 'prod-cluster-1', lastDeployed: '1 day ago' },
+    ]
   },
   {
     id: 2,
@@ -25,7 +34,16 @@ const initialProjects = [
     status: "Active",
     progress: 62,
     models: 2,
-    datasets: 4,
+    datasets: [
+       { id: 'ds-101', name: 'Web Articles Corpus', recordCount: 50000, type: 'Source', lastUpdated: '1 week ago' },
+       { id: 'ds-102', name: 'Training Summaries', recordCount: 45000, type: 'Derived', lastUpdated: '4 days ago' },
+       { id: 'ds-103', name: 'Validation Set', recordCount: 5000, type: 'Derived', lastUpdated: '4 days ago' },
+       { id: 'ds-104', name: 'Fine-tuning Data', recordCount: 10000, type: 'Derived', lastUpdated: '3 days ago' },
+    ],
+    environments: [
+      { id: 'dev', name: 'Development', status: 'Synced', deployedVersion: 'v0.8.0', cluster: 'dev-cluster', lastDeployed: '30 mins ago' },
+      { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v0.7.5', cluster: 'prod-genai', lastDeployed: '3 days ago' },
+    ]
   },
   {
     id: 3,
@@ -35,9 +53,14 @@ const initialProjects = [
     status: "Inactive",
     progress: 32,
     models: 1,
-    datasets: 3,
+    datasets: [
+      { id: 'ds-201', name: 'ImageNet Samples', recordCount: 100000, type: 'Source', lastUpdated: '1 month ago' },
+      { id: 'ds-202', name: 'Augmented Training Images', recordCount: 500000, type: 'Derived', lastUpdated: '1 week ago' },
+      { id: 'ds-203', name: 'Validation Images', recordCount: 10000, type: 'Derived', lastUpdated: '1 week ago' },
+    ],
+    environments: [] // No environments configured yet
   },
-  {
+   {
     id: 4,
     name: "Sentiment Analysis API",
     description: "API endpoint for real-time sentiment analysis of customer feedback and social media mentions.",
@@ -45,15 +68,41 @@ const initialProjects = [
     status: "Active",
     progress: 90,
     models: 1,
-    datasets: 2,
+    datasets: [
+       { id: 'ds-301', name: 'Customer Feedback DB', recordCount: 80000, type: 'Source', lastUpdated: '2 days ago' },
+       { id: 'ds-302', name: 'Cleaned Sentiment Data', recordCount: 75000, type: 'Derived', lastUpdated: '1 day ago' },
+    ],
+    environments: [
+       { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v2.0.0', cluster: 'prod-cluster-2', lastDeployed: '1 week ago' },
+    ]
   },
 ];
 
 // Helper to get status styles
 const getStatusClasses = (status: string) => {
-  return status === 'Active' 
-    ? 'bg-green-100 text-green-800' 
-    : 'bg-gray-100 text-gray-800';
+  switch (status.toLowerCase()) {
+    case 'active':
+    case 'synced':
+      return 'bg-green-100 text-green-800';
+    case 'inactive':
+      return 'bg-gray-100 text-gray-800';
+    case 'error':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-yellow-100 text-yellow-800';
+  }
+};
+
+// Helper function for Dataset Type badge styles
+const getDatasetTypeClasses = (type: string) => {
+  switch (type.toLowerCase()) {
+    case 'source':
+      return 'border-blue-400 text-blue-700 bg-blue-50';
+    case 'derived':
+      return 'border-purple-400 text-purple-700 bg-purple-50';
+    default:
+      return 'border-gray-400 text-gray-700 bg-gray-50';
+  }
 };
 
 export default function ProjectDetailPage() {
@@ -79,97 +128,55 @@ export default function ProjectDetailPage() {
     );
   }
 
+  // Tab definitions including Environments
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: BarChart2 },
+    { id: 'models', label: 'Models', icon: Package },
+    { id: 'datasets', label: 'Datasets', icon: FlaskConical },
+    { id: 'environments', label: 'Environments', icon: Server },
+    { id: 'settings', label: 'Settings', icon: Settings },
+  ];
+
   // Content for each tab
   const renderTabContent = () => {
     switch(activeTab) {
       case 'overview':
         return (
           <div>
-            {/* Project Overview Stats */}
+            {/* Project Overview Stats - Use updated project data */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                <p className="text-gray-500 text-sm">Progress</p>
-                <p className="font-medium text-lg text-gray-800 mb-1">{project.progress}%</p>
-                {/* Progress bar */}
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full" 
-                    style={{ width: `${project.progress}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                <p className="text-gray-500 text-sm">Models</p>
-                <div className="flex items-center">
-                  <p className="font-medium text-lg text-gray-800">{project.models}</p>
-                  <span className="ml-2 text-xs text-blue-600">
-                    {project.models > 0 ? '+1 this week' : 'None yet'}
-                  </span>
-                </div>
-              </div>
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                <p className="text-gray-500 text-sm">Datasets</p>
-                <p className="font-medium text-lg text-gray-800">{project.datasets}</p>
+              <div className="bg-card p-4 rounded-lg border border-border">
+                 <p className="text-xs text-muted-foreground mb-1">Models</p>
+                 <h3 className="text-xl font-bold">{project.models}</h3>
+               </div>
+               <div className="bg-card p-4 rounded-lg border border-border">
+                 <p className="text-xs text-muted-foreground mb-1">Datasets</p>
+                 {/* Display count from updated dataset array */}
+                 <h3 className="text-xl font-bold">{project.datasets.length}</h3> 
+               </div>
+               <div className="bg-card p-4 rounded-lg border border-border">
+                 <p className="text-xs text-muted-foreground mb-1">Progress</p>
+                 <h3 className="text-xl font-bold">{project.progress}%</h3>
               </div>
             </div>
-
-            {/* Recent Activity */}
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm mb-6">
-              <div className="border-b border-gray-200 px-6 py-4">
-                <h3 className="text-lg font-medium text-gray-900">Recent Activity</h3>
-              </div>
-              <div className="p-6">
-                {project.models > 0 ? (
-                  <div className="space-y-4">
-                    <div className="flex">
-                      <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-green-500 mr-3"></div>
-                      <div>
-                        <p className="text-sm text-gray-800">Model training completed successfully</p>
-                        <p className="text-xs text-gray-500">Yesterday at 3:45 PM</p>
-                      </div>
-                    </div>
-                    <div className="flex">
-                      <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-blue-500 mr-3"></div>
-                      <div>
-                        <p className="text-sm text-gray-800">Dataset updated with new records</p>
-                        <p className="text-xs text-gray-500">2 days ago at 10:30 AM</p>
-                      </div>
-                    </div>
-                    <div className="flex">
-                      <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-purple-500 mr-3"></div>
-                      <div>
-                        <p className="text-sm text-gray-800">Project created</p>
-                        <p className="text-xs text-gray-500">1 week ago</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <p>No activity yet</p>
-                    <p className="text-sm mt-1">Start by adding datasets or training models</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Project Description */}
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-              <div className="border-b border-gray-200 px-6 py-4">
-                <h3 className="text-lg font-medium text-gray-900">About This Project</h3>
-              </div>
-              <div className="p-6">
-                <p className="text-gray-700 mb-4">{project.description}</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-500">Created</p>
-                    <p className="font-medium">2 weeks ago</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Team</p>
-                    <p className="font-medium">Data Science</p>
-                  </div>
-                </div>
-              </div>
+             {/* Progress Bar */}
+             <div className="bg-card p-4 rounded-lg border border-border mb-6">
+               <p className="text-sm font-medium text-foreground mb-2">Project Progress</p>
+               <div className="flex justify-between text-xs mb-1">
+                 <span className="text-muted-foreground">Progress</span>
+                 <span className="font-medium text-foreground">{project.progress}%</span>
+               </div>
+               <div className="w-full bg-secondary rounded-full h-2">
+                 <div 
+                   className="bg-primary h-2 rounded-full transition-all duration-500 ease-out" 
+                   style={{ width: `${project.progress}%` }}
+                 ></div>
+               </div>
+             </div>
+            {/* Recent Activity Placeholder */}
+            <div className="bg-card p-4 rounded-lg border border-border">
+              <h4 className="text-sm font-medium text-foreground mb-3">Recent Activity</h4>
+              <p className="text-xs text-muted-foreground">No recent activity recorded.</p>
             </div>
           </div>
         );
@@ -611,172 +618,175 @@ export default function ProjectDetailPage() {
         );
       case 'datasets':
         return (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-xl font-medium text-gray-900">Datasets</h2>
-                <p className="text-sm text-gray-500 mt-1">Data sources for this project</p>
-              </div>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 flex items-center">
-                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                </svg>
-                Add Dataset
-              </button>
-            </div>
+          <div className="space-y-4">
+             <div className="flex justify-between items-center">
+               <h3 className="text-lg font-medium text-foreground">Datasets ({project.datasets.length})</h3>
+               <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md flex items-center text-sm font-medium transition-colors">
+                 <PlusCircle className="w-4 h-4 mr-1.5" />
+                 Add Dataset
+               </button>
+             </div>
 
-            {/* Simple dataset list placeholder */}
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-              <div className="px-6 py-3 border-b border-gray-200 bg-gray-50">
-                <h3 className="text-sm font-medium text-gray-900">Available Datasets</h3>
-              </div>
-              <div className="divide-y divide-gray-200">
-                {project.datasets > 0 ? (
-                  Array(project.datasets).fill(0).map((_, i) => (
-                    <div key={i} className="px-6 py-4 flex justify-between items-center">
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-900">
-                          {i === 0 ? "Customer Transactions" : "Customer Demographics"}
-                        </h4>
-                        <p className="text-xs text-gray-500">
-                          {i === 0 ? "1.2M records" : "450K records"} • Updated {i === 0 ? "5 days ago" : "2 weeks ago"}
-                        </p>
-                      </div>
-                      <button className="px-3 py-1 bg-white border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">
-                        View
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <div className="px-6 py-8 text-center">
-                    <p className="text-gray-500">No datasets available</p>
-                  </div>
-                )}
-              </div>
-            </div>
+             {project.datasets.length > 0 ? (
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                 <table className="min-w-full divide-y divide-border">
+                   <thead className="bg-secondary/50">
+                     <tr>
+                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</th>
+                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Type</th>
+                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Records</th>
+                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Updated</th>
+                       <th scope="col" className="relative px-6 py-3">
+                         <span className="sr-only">Actions</span>
+                       </th>
+                     </tr>
+                   </thead>
+                   <tbody className="bg-card divide-y divide-border">
+                     {project.datasets.map((dataset) => (
+                       <tr key={dataset.id}>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">{dataset.name}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getDatasetTypeClasses(dataset.type)}`}>
+                              {dataset.type}
+                            </span>
+                         </td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{dataset.recordCount.toLocaleString()}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{dataset.lastUpdated}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                           {/* Link to future dataset detail page */}
+                           <Link href={`/datasets/${dataset.id}`} className="text-primary hover:text-primary/80">
+                             View
+                           </Link>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             ) : (
+              <div className="text-center py-10 bg-card rounded-lg border border-border">
+                 <FlaskConical className="mx-auto h-12 w-12 text-muted-foreground"/>
+                 <h3 className="mt-2 text-sm font-semibold text-foreground">No datasets found</h3>
+                 <p className="mt-1 text-sm text-muted-foreground">Add datasets to start training models.</p>
+                 <div className="mt-6">
+                   <button type="button" className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                     <PlusCircle className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
+                     Add Dataset
+                   </button>
+                 </div>
+               </div>
+             )}
           </div>
         );
-      case 'experiments':
+      case 'environments':
         return (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-xl font-medium text-gray-900">Experiments</h2>
-                <p className="text-sm text-gray-500 mt-1">Track and compare model training runs</p>
-              </div>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 flex items-center">
-                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                </svg>
-                New Experiment
-              </button>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-medium text-foreground">Project Environments</h3>
+              {/* Button to add/configure might also go here if environments exist */}
+              {project.environments.length > 0 && (
+                 <button type="button" className="inline-flex items-center rounded-md bg-secondary px-3 py-2 text-sm font-semibold text-secondary-foreground shadow-sm hover:bg-secondary/80">
+                   <Settings className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />
+                   Configure Environments
+                 </button>
+              )}
             </div>
-
-            {/* Placeholder for experiments */}
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8 text-center">
-              <div className="text-gray-400 mb-3">
-                <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
-                </svg>
+            {project.environments.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {project.environments.map(env => (
+                  <div key={env.id} className="bg-card p-4 rounded-lg border border-border shadow-sm">
+                    <div className="flex justify-between items-center mb-2">
+                       <h4 className="font-semibold text-foreground">{env.name}</h4>
+                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(env.status)}`}>
+                         {env.status}
+                       </span>
+                    </div>
+                     <p className="text-xs text-muted-foreground mb-1">Cluster: <span className="font-medium text-foreground">{env.cluster}</span></p>
+                     <p className="text-xs text-muted-foreground mb-1">Deployed Version: <span className="font-medium text-foreground">{env.deployedVersion}</span></p>
+                     <p className="text-xs text-muted-foreground">Last Deployed: <span className="font-medium text-foreground">{env.lastDeployed}</span></p>
+                     {/* Add actions like View Details, Deploy, etc. later */}
+                     <div className="mt-3 pt-3 border-t border-border flex justify-end">
+                        <button className="text-xs text-primary hover:underline">View Details</button>
+                     </div>
+                  </div>
+                ))}
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-1">No experiments yet</h3>
-              <p className="text-gray-500 max-w-sm mx-auto mb-4">Run experiments to track model performance and compare different approaches.</p>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                Create First Experiment
-              </button>
-            </div>
+            ) : (
+              <div className="text-center py-10 bg-card rounded-lg border border-border">
+                 <Server className="mx-auto h-12 w-12 text-muted-foreground"/>
+                 <h3 className="mt-2 text-sm font-semibold text-foreground">No environments configured</h3>
+                 <p className="mt-1 text-sm text-muted-foreground">Get started by adding a deployment environment for this project.</p>
+                 <div className="mt-6">
+                   <button type="button" className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                     <PlusCircle className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
+                     Add Environment
+                   </button>
+                 </div>
+               </div>
+            )}
+          </div>
+        );
+      case 'settings':
+        return (
+          <div className="bg-card p-6 rounded-lg border border-border">
+            <h3 className="text-lg font-medium text-foreground mb-4">Project Settings</h3>
+            <p className="text-sm text-muted-foreground">Settings placeholder...</p>
           </div>
         );
       default:
-        return <div>Tab content not found</div>;
+        return <div>Select a tab</div>;
     }
   };
 
   return (
-    <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
-      {/* Project Header */}
-      <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-        <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-900">{project.name}</h1>
-            <p className="text-gray-600 mb-2">{project.description}</p>
-            <div className="text-sm text-gray-500">Last Updated: {project.lastUpdated}</div>
-          </div>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusClasses(project.status)}`}>
-            {project.status}
-          </span>
+    <div className="space-y-6">
+      {/* Enhanced Project Header */}
+      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 p-6 bg-card border border-border rounded-lg shadow-sm">
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold text-foreground mb-1 flex items-center">
+            {project.name}
+            <span className={`ml-3 px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(project.status)}`}>
+              {project.status}
+            </span>
+          </h1>
+          <p className="text-sm text-muted-foreground mb-3">{project.description}</p>
+          <p className="text-xs text-muted-foreground">Last updated: {project.lastUpdated}</p>
         </div>
-        
-        {/* Action buttons */}
-        <div className="flex space-x-2 mt-4">
-          <button className="px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">
+        <div className="flex items-center gap-2 pt-2 md:pt-0">
+          <button className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-md flex items-center text-xs font-medium transition-colors">
+            <Pencil className="w-3 h-3 mr-1.5" />
             Edit Project
           </button>
-          <button className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
+          <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md flex items-center text-xs font-medium transition-colors">
+            <Play className="w-3 h-3 mr-1.5" />
             Run Pipeline
           </button>
         </div>
       </div>
 
-      {/* Tabs Navigation */}
-      <div className="border-b border-gray-200">
-        <div className="flex">
-          <button 
-            onClick={() => setActiveTab('overview')} 
-            className={`px-4 py-2 text-sm font-medium ${
-              activeTab === 'overview' 
-                ? 'text-blue-600 border-b-2 border-blue-600' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Overview
-          </button>
-          <button 
-            onClick={() => setActiveTab('performance')} 
-            className={`px-4 py-2 text-sm font-medium ${
-              activeTab === 'performance' 
-                ? 'text-blue-600 border-b-2 border-blue-600' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Performance
-          </button>
-          <button 
-            onClick={() => setActiveTab('configuration')} 
-            className={`px-4 py-2 text-sm font-medium ${
-              activeTab === 'configuration' 
-                ? 'text-blue-600 border-b-2 border-blue-600' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Configuration
-          </button>
-          <button 
-            onClick={() => setActiveTab('deployments')} 
-            className={`px-4 py-2 text-sm font-medium ${
-              activeTab === 'deployments' 
-                ? 'text-blue-600 border-b-2 border-blue-600' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Deployments
-          </button>
-          <button 
-            onClick={() => setActiveTab('training_history')} 
-            className={`px-4 py-2 text-sm font-medium ${
-              activeTab === 'training_history' 
-                ? 'text-blue-600 border-b-2 border-blue-600' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Training History
-          </button>
-        </div>
+      {/* Tab Navigation */}
+      <div className="border-b border-border">
+        <nav className="flex -mb-px space-x-6" aria-label="Tabs">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center px-1 pb-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.id
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
+              }`}
+            >
+              <tab.icon className="w-4 h-4 mr-2" />
+              {tab.label}
+            </button>
+          ))}
+        </nav>
       </div>
-      
-      {/* Tab Content - no additional wrapper/card */}
-      <div>
-        {renderTabContent()}
+
+      {/* Tab Content Area */}
+      <div className="py-4">
+         {renderTabContent()} 
       </div>
     </div>
   );

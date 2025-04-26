@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { User, Bell, KeyRound, Palette, ShieldCheck } from "lucide-react"; // Removed CreditCard
+import { User, Bell, KeyRound, Palette, ShieldCheck, GitBranch } from "lucide-react"; // Removed CreditCard
 
 // Define settings sections
 const settingsSections = [
   { key: 'profile', label: 'Profile', icon: User },
   { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'apiKeys', label: 'API Keys', icon: KeyRound },
+  { key: 'masterRepo', label: 'Master Repository', icon: GitBranch },
   { key: 'appearance', label: 'Appearance', icon: Palette },
   { key: 'security', label: 'Security', icon: ShieldCheck },
   // Add more sections as needed
@@ -129,6 +130,42 @@ const SecuritySettings = () => (
   </div>
 );
 
+// New Placeholder for Master Repo Settings
+const MasterRepoSettings = () => (
+  <div>
+    <h2 className="text-xl font-semibold mb-4">Master Repository Configuration</h2>
+    <p className="text-gray-600 mb-6">
+      Configure the central Git repository used for managing project configurations and promoting GitOps practices.
+    </p>
+    <div className="space-y-4">
+       <div>
+        <label htmlFor="repoUrl" className="block text-sm font-medium text-gray-700">Repository URL</label>
+        <input 
+          type="text" 
+          id="repoUrl" 
+          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+          placeholder="e.g., git@github.com:your-org/mlops-config.git" 
+        />
+      </div>
+       <div>
+        <label htmlFor="repoBranch" className="block text-sm font-medium text-gray-700">Branch</label>
+        <input 
+          type="text" 
+          id="repoBranch" 
+          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+          placeholder="e.g., main" 
+        />
+      </div>
+      <div>
+         {/* Placeholder for authentication/credentials */}
+         <p className="text-xs text-gray-500 mt-1">Authentication details (e.g., SSH key or token) may need to be configured separately.</p>
+      </div>
+      <div className="pt-4">
+         <button className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+);
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState(settingsSections[0].key);
@@ -141,6 +178,8 @@ export default function SettingsPage() {
         return <NotificationSettings />;
       case 'apiKeys':
         return <ApiKeySettings />;
+      case 'masterRepo':
+        return <MasterRepoSettings />;
       /* case 'billing': // Removed Billing case
         return <BillingSettings />; */
       case 'appearance':
@@ -157,7 +196,7 @@ export default function SettingsPage() {
        <h1 className="text-2xl font-semibold mb-6">Settings</h1>
        {/* Tab Navigation */}
        <div className="border-b border-gray-200 mb-6">
-         <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+         <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Tabs">
            {settingsSections.map((section) => (
              <button
                key={section.key}
