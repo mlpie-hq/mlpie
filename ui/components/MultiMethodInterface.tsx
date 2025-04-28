@@ -1,8 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, KeyboardEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
-import { prism } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { Copy, X, Check } from 'lucide-react';
+
+export type FormData = Record<string, string | number | boolean | string[]>;
+
+export type UIFormField = {
+  id: string;
+  name: string;
+  label: string;
+  type: 'text' | 'textarea' | 'number' | 'select';
+  placeholder?: string;
+  required?: boolean;
+  value: string | number;
+  onChange: (value: string | number) => void;
+  options?: { value: string; label: string }[];
+};
 
 export type CodeExample = {
   yamlExample: string;
@@ -10,38 +24,22 @@ export type CodeExample = {
   sdkExample: string;
 };
 
-export type UIFormField = {
-  id: string;
-  name: string;
-  label: string;
-  type: 'text' | 'textarea' | 'select';
-  placeholder: string;
-  required?: boolean;
-  value: string;
-  onChange: (value: string) => void;
-  options?: Array<{value: string; label: string}>;
-};
-
-// Define the shape for the optional tags prop
-type TagHandling = {
-  tags: string[];
-  tagInput: string;
-  setTagInput: (value: string) => void;
-  handleAddTag: () => void;
-  handleRemoveTag: (tag: string) => void;
-  handleTagKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-};
-
-type MultiMethodInterfaceProps = {
+export interface MultiMethodInterfaceProps {
   title?: string;
   fields: UIFormField[];
-  getExampleCode: () => CodeExample;
-  onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
-  tags?: TagHandling;
+  getExampleCode: (formData: FormData) => CodeExample;
+  onSubmit: (formData: FormData) => void;
+  tags?: string[];
+  tagInput?: string;
+  onAddTag?: (tag: string) => void;
+  onRemoveTag?: (tagToRemove: string) => void;
+  onTagInputChange?: (value: string) => void;
+  onTagInputKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
   yamlInstructions?: string;
   cliInstructions?: string;
   sdkInstructions?: string;
-};
+  submitButtonText?: string;
+}
 
 // Animation variants for tab transitions
 const tabVariants = {
@@ -65,38 +63,116 @@ const tabVariants = {
 };
 
 const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
-  title,
+  title = "Create Resource",
   fields,
   getExampleCode,
   onSubmit,
   tags,
-  yamlInstructions = 'Define in YAML and apply with:',
-  cliInstructions = 'Use the command-line interface:',
-  sdkInstructions = 'Use the Python SDK:',
+  tagInput,
+  onAddTag,
+  onRemoveTag,
+  onTagInputChange,
+  onTagInputKeyDown,
+  yamlInstructions = "Define your resource configuration in YAML format.",
+  cliInstructions = "Use the command-line interface to create the resource.",
+  sdkInstructions = "Use the Python SDK to programmatically create the resource.",
+  submitButtonText = "Create",
 }) => {
   const [activeTab, setActiveTab] = useState('ui');
-  const { yamlExample, cliExample, sdkExample } = getExampleCode();
+  const [formData, setFormData] = useState<FormData>(
+    fields.reduce((acc, field) => {
+      acc[field.name] = field.value;
+      return acc;
+    }, {} as FormData)
+  );
+  const [copiedStates, setCopiedStates] = useState({ yaml: false, cli: false, sdk: false });
 
-  // Select theme based on active tab
-  const currentTheme = activeTab === 'yaml' ? prism : vscDarkPlus;
-  const currentBgColor = activeTab === 'yaml' ? '#f9fafb' : '#111827'; // bg-gray-50 or bg-gray-900
+  React.useEffect(() => {
+    const newFormData = fields.reduce((acc, field) => {
+      acc[field.name] = field.value;
+      return acc;
+    }, {} as FormData);
+    setFormData(newFormData);
+  }, [fields]);
 
-  // Custom style for syntax highlighter
-  const customStyle = {
-    ...currentTheme,
-    'pre[class*="language-"]': {
-      ...(currentTheme['pre[class*="language-"]'] || {}), // Handle potential undefined style
-      backgroundColor: currentBgColor,
-      padding: '0.5rem', 
-      margin: 0, 
-      borderRadius: '0.375rem',
-      height: '100%', // Ensure pre fills the container
-      overflow: 'auto' // Add scrollbars if needed within pre
-    },
-     'code[class*="language-"]': {
-      ...(currentTheme['code[class*="language-"]'] || {}), // Handle potential undefined style
-      fontFamily: 'inherit', 
-      fontSize: '0.875rem' 
+  const handleInputChange = (name: string, value: string | number) => {
+    const field = fields.find(f => f.name === name);
+    field?.onChange(value);
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const currentFormData = fields.reduce((acc, field) => {
+        acc[field.name] = field.value;
+        return acc;
+    }, {} as FormData);
+    if (tags && tags.length > 0) {
+        currentFormData.tags = tags;
+    }
+    console.log("Submitting form data:", currentFormData);
+    onSubmit(currentFormData);
+  };
+
+  const codeExamples = getExampleCode(formData);
+
+  const copyToClipboard = (text: string, type: 'yaml' | 'cli' | 'sdk') => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedStates(prev => ({ ...prev, [type]: true }));
+      setTimeout(() => setCopiedStates(prev => ({ ...prev, [type]: false })), 1500);
+    }).catch(err => {
+      console.error('Failed to copy text: ', err);
+    });
+  };
+
+  const renderField = (field: UIFormField) => {
+    // Common classes for input fields matching screenshot style
+    const commonInputClasses = "block w-full rounded-md border border-gray-300 shadow-sm px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50 bg-white";
+
+    switch (field.type) {
+      case 'textarea':
+        return (
+          <textarea
+            id={field.id}
+            name={field.name}
+            rows={3}
+            className={commonInputClasses} // Apply common style
+            placeholder={field.placeholder}
+            value={field.value as string}
+            onChange={(e) => handleInputChange(field.name, e.target.value)}
+            required={field.required}
+          />
+        );
+      case 'select':
+        return (
+            <select
+                id={field.id}
+                name={field.name}
+                className={commonInputClasses} // Apply common style
+                value={field.value}
+                onChange={(e) => handleInputChange(field.name, e.target.value)}
+                required={field.required}
+            >
+                {field.placeholder && <option value="" disabled>{field.placeholder}</option>}
+                {field.options?.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+            </select>
+        );
+      case 'text':
+      case 'number':
+      default:
+        return (
+          <input
+            type={field.type === 'number' ? 'number' : 'text'}
+            id={field.id}
+            name={field.name}
+            className={commonInputClasses} // Apply common style
+            placeholder={field.placeholder}
+            value={field.value}
+            onChange={(e) => handleInputChange(field.name, e.target.value)}
+            required={field.required}
+          />
+        );
     }
   };
 
@@ -108,7 +184,6 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
         </div>
       )}
       
-      {/* Tab Navigation */}
       <div className="border-b border-border mb-6">
         <nav className="flex -mb-px" aria-label="Tabs">
           {['ui', 'yaml', 'cli', 'sdk'].map((tab) => (
@@ -125,7 +200,6 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                tab === 'yaml' ? 'YAML' : 
                tab === 'cli' ? 'CLI' : 'Python SDK'}
               
-              {/* Animated underline */}
               {activeTab === tab && (
                 <motion.div 
                   className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500"
@@ -138,124 +212,72 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
         </nav>
       </div>
       
-      {/* REMOVE Fixed height container for all tab content */}
-      {/* Let height be determined by content */}
       <div className="flex flex-col relative">
         <AnimatePresence mode="wait">
-          {/* UI Tab */} 
           {activeTab === 'ui' && (
             <motion.div
               key="ui-tab"
-              // Remove absolute positioning if container height is not fixed
               className="flex-1"
               variants={tabVariants}
               initial="hidden"
               animate="visible"
               exit="exit"
             >
-              <form onSubmit={onSubmit} className="h-full flex flex-col" id="multi-method-interface-form">
-                 {/* Let this div scroll if content overflows */}
+              <form onSubmit={handleSubmit} className="h-full flex flex-col" id="multi-method-interface-form">
                 <div className="flex-1 overflow-y-auto space-y-4 pb-4 mb-6">
-                  {/* Form Fields */}
                   {fields.map((field) => (
                     <div key={field.id}>
                       <label htmlFor={field.id} className="block text-sm font-medium text-gray-700 mb-1">
                         {field.label}{field.required && '*'}
                       </label>
-                      {field.type === 'textarea' ? (
-                        <textarea
-                          id={field.id}
-                          name={field.name}
-                          value={field.value}
-                          onChange={(e) => field.onChange(e.target.value)}
-                          required={field.required}
-                          rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                          placeholder={field.placeholder}
-                        />
-                      ) : field.type === 'select' ? (
-                        <select
-                          id={field.id}
-                          name={field.name}
-                          value={field.value}
-                          onChange={(e) => field.onChange(e.target.value)}
-                          required={field.required}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                        >
-                          {field.options?.map(option => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          id={field.id}
-                          name={field.name}
-                          value={field.value}
-                          onChange={(e) => field.onChange(e.target.value)}
-                          required={field.required}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                          placeholder={field.placeholder}
-                        />
-                      )}
+                      {renderField(field)}
                     </div>
                   ))}
                   
-                  {/* Tags Input (Optional) */}
-                  {tags && (
+                  {tags !== undefined && onAddTag && onRemoveTag && onTagInputChange && onTagInputKeyDown && (
                     <div>
-                      <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
-                      <div className="flex">
-                        <input
-                          type="text"
-                          id="tagInput"
-                          value={tags.tagInput}
-                          onChange={(e) => tags.setTagInput(e.target.value)}
-                          onKeyDown={tags.handleTagKeyDown}
-                          className="flex-grow px-3 py-2 border border-gray-300 rounded-l-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                          placeholder="Add a tag"
-                        />
-                        <button
-                          type="button"
-                          onClick={tags.handleAddTag}
-                          className="bg-gray-100 px-3 py-2 border border-l-0 border-gray-300 rounded-r-md hover:bg-gray-200"
-                        >
-                          Add
-                        </button>
-                      </div>
-                      <AnimatePresence>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {tags.tags.map(tag => (
-                            <motion.span 
-                              key={tag} 
-                              className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center"
-                              initial={{ opacity: 0, scale: 0.8 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              exit={{ opacity: 0, scale: 0.8 }}
-                              transition={{ duration: 0.2 }}
-                            >
-                              {tag}
-                              <button
-                                type="button"
-                                onClick={() => tags.handleRemoveTag(tag)}
-                                className="ml-1 text-blue-600 hover:text-blue-800"
-                              >
-                                ×
-                              </button>
-                            </motion.span>
+                      <label htmlFor="tags-input" className="block text-sm font-medium text-foreground mb-1">
+                        Tags (optional)
+                      </label>
+                      <div className="flex items-center flex-wrap gap-2 mb-2">
+                          {tags.map(tag => (
+                              <span key={tag} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary text-secondary-foreground border border-border">
+                                  {tag}
+                                  <button
+                                      type="button"
+                                      onClick={() => onRemoveTag(tag)}
+                                      className="ml-1.5 flex-shrink-0 text-muted-foreground hover:text-foreground focus:outline-none"
+                                      aria-label={`Remove ${tag} tag`}
+                                  >
+                                      <X className="h-3 w-3" />
+                                  </button>
+                              </span>
                           ))}
-                        </div>
-                      </AnimatePresence>
+                      </div>
+                      <input
+                        type="text"
+                        id="tags-input"
+                        className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        placeholder="Add a tag and press Enter..."
+                        value={tagInput}
+                        onChange={(e) => onTagInputChange(e.target.value)}
+                        onKeyDown={onTagInputKeyDown}
+                      />
                     </div>
                   )}
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    className="inline-flex justify-center rounded-md border border-transparent bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    {submitButtonText}
+                  </button>
                 </div>
               </form>
             </motion.div>
           )}
 
-          {/* YAML Tab */} 
           {activeTab === 'yaml' && (
             <motion.div
               key="yaml-tab" 
@@ -265,44 +287,36 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
               animate="visible"
               exit="exit"
             >
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <p className="text-sm text-gray-600 mb-4">
-                  {yamlInstructions} <code className="bg-gray-100 px-1 py-0.5 rounded">mlpie apply -f resource.yaml</code>
-                </p>
-                
-                <div className="flex-1 rounded-md overflow-hidden overflow-x-auto"> 
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">{yamlInstructions}</p>
+                <div className="relative rounded-md border border-border p-0 overflow-hidden"> 
                   <SyntaxHighlighter 
                     language="yaml" 
-                    style={customStyle} 
-                    customStyle={{ height: '100%', margin: 0 }} 
-                    wrapLines={true}
-                    showLineNumbers={false}
+                    style={vscDarkPlus} // Use vscDarkPlus style
+                    customStyle={{ 
+                      margin: 0, 
+                      padding: '1rem', 
+                      // Let the theme handle background
+                      // background: 'transparent', 
+                      overflowX: 'auto' 
+                    }}
+                    wrapLongLines={false}
+                    className="text-sm"
                   >
-                    {yamlExample}
+                    {codeExamples.yamlExample}
                   </SyntaxHighlighter>
+                  <button
+                    onClick={() => copyToClipboard(codeExamples.yamlExample, 'yaml')}
+                    className="absolute top-2 right-2 p-1.5 bg-gray-800/70 backdrop-blur-sm rounded-md text-gray-300 hover:text-white border border-gray-600 transition-all"
+                    title={copiedStates.yaml ? "Copied!" : "Copy YAML"}
+                  >
+                    {copiedStates.yaml ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
                 </div>
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 mt-4">
-                <motion.button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(yamlExample);
-                  }}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium flex items-center"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                  </svg>
-                  Copy YAML
-                </motion.button>
               </div>
             </motion.div>
           )}
 
-          {/* CLI Tab */} 
           {activeTab === 'cli' && (
             <motion.div
               key="cli-tab" 
@@ -312,44 +326,35 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
               animate="visible"
               exit="exit"
             >
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <p className="text-sm text-gray-600 mb-4">
-                  {cliInstructions}
-                </p>
-                
-                <div className="flex-1 rounded-md overflow-hidden overflow-x-auto">
-                  <SyntaxHighlighter 
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">{cliInstructions}</p>
+                <div className="relative rounded-md border border-border p-0 overflow-hidden">
+                   <SyntaxHighlighter 
                     language="bash" 
-                    style={customStyle} 
-                    customStyle={{ height: '100%', margin: 0 }}
-                    wrapLines={true}
-                    showLineNumbers={false}
+                    style={vscDarkPlus} // Use vscDarkPlus style
+                     customStyle={{ 
+                      margin: 0, 
+                      padding: '1rem', 
+                      // background: 'transparent', 
+                      overflowX: 'auto' 
+                    }}
+                    wrapLongLines={true}
+                    className="text-sm"
                   >
-                    {cliExample}
+                    {codeExamples.cliExample}
                   </SyntaxHighlighter>
+                   <button
+                     onClick={() => copyToClipboard(codeExamples.cliExample, 'cli')}
+                     className="absolute top-2 right-2 p-1.5 bg-gray-800/70 backdrop-blur-sm rounded-md text-gray-300 hover:text-white border border-gray-600 transition-all"
+                     title={copiedStates.cli ? "Copied!" : "Copy CLI command"}
+                   >
+                     {copiedStates.cli ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                   </button>
                 </div>
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 mt-4">
-                <motion.button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(cliExample);
-                  }}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium flex items-center"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                  </svg>
-                  Copy Command
-                </motion.button>
               </div>
             </motion.div>
           )}
 
-          {/* SDK Tab */} 
           {activeTab === 'sdk' && (
             <motion.div
               key="sdk-tab" 
@@ -359,39 +364,31 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
               animate="visible"
               exit="exit"
             >
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <p className="text-sm text-gray-600 mb-4">
-                  {sdkInstructions}
-                </p>
-                
-                <div className="flex-1 rounded-md overflow-hidden overflow-x-auto">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">{sdkInstructions}</p>
+                <div className="relative rounded-md border border-border p-0 overflow-hidden">
                   <SyntaxHighlighter 
                     language="python" 
-                    style={customStyle} 
-                    customStyle={{ height: '100%', margin: 0 }}
-                    wrapLines={true}
-                    showLineNumbers={false}
+                    style={vscDarkPlus} // Use vscDarkPlus style
+                    customStyle={{ 
+                      margin: 0, 
+                      padding: '1rem', 
+                      // background: 'transparent', 
+                      overflowX: 'auto' 
+                    }}
+                    wrapLongLines={false}
+                    className="text-sm"
                   >
-                    {sdkExample}
+                    {codeExamples.sdkExample}
                   </SyntaxHighlighter>
+                   <button
+                    onClick={() => copyToClipboard(codeExamples.sdkExample, 'sdk')}
+                     className="absolute top-2 right-2 p-1.5 bg-gray-800/70 backdrop-blur-sm rounded-md text-gray-300 hover:text-white border border-gray-600 transition-all"
+                    title={copiedStates.sdk ? "Copied!" : "Copy SDK code"}
+                  >
+                    {copiedStates.sdk ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
                 </div>
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 mt-4">
-                <motion.button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(sdkExample);
-                  }}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium flex items-center"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                  </svg>
-                  Copy Code
-                </motion.button>
               </div>
             </motion.div>
           )}

@@ -1,13 +1,55 @@
 "use client";
 
 import { useParams } from 'next/navigation';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil } from 'lucide-react';
+import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil, Trash2, Edit, GitBranch, RefreshCw, X, MoreVertical } from 'lucide-react';
+import MultiMethodInterface, { UIFormField, CodeExample, FormData } from '@/components/MultiMethodInterface';
+
+// Define GitRepository Type with name
+type GitRepository = {
+  id: string;
+  name: string;
+  url: string;
+  branch: string;
+  lastSync: string;
+  status: string; // e.g., 'Synced', 'Pending', 'Error'
+};
+
+// Define Environment Type clearly at the top level
+type Environment = {
+  id: string;
+  name: string;
+  status: string;
+  deployedVersion: string;
+  cluster: string;
+  lastDeployed: string;
+};
+
+type ProjectDataset = {
+  id: string;
+  name: string;
+  recordCount: number;
+  type: string;
+  lastUpdated: string;
+};
+
+type Project = {
+  id: number;
+  name: string;
+  description: string;
+  lastUpdated: string;
+  status: string;
+  progress: number;
+  models: number;
+  datasets: ProjectDataset[];
+  environments: Environment[];
+  gitRepos: GitRepository[]; // Add Git Repos array
+};
 
 // Temporary: Import or copy the initialProjects data structure for lookup
 // In a real app, you'd fetch this data based on the ID
-const initialProjects = [
+const initialProjects: Project[] = [
   {
     id: 1,
     name: "Customer Churn Prediction",
@@ -24,6 +66,10 @@ const initialProjects = [
       { id: 'dev', name: 'Development', status: 'Synced', deployedVersion: 'v1.2.1-beta', cluster: 'dev-cluster', lastDeployed: '15 mins ago' },
       { id: 'staging', name: 'Staging', status: 'Synced', deployedVersion: 'v1.2.0', cluster: 'staging-cluster', lastDeployed: '2 hours ago' },
       { id: 'prod', name: 'Production', status: 'Error', deployedVersion: 'v1.1.5', cluster: 'prod-cluster-1', lastDeployed: '1 day ago' },
+    ],
+    gitRepos: [
+      { id: 'repo-1', name: 'Main Churn Logic', url: 'https://github.com/mlpie-oss/churn-prediction', branch: 'main', lastSync: '5 mins ago', status: 'Synced' },
+      { id: 'repo-2', name: 'Data Pipelines', url: 'https://dev.azure.com/org/project/_git/customer-data-pipelines', branch: 'develop', lastSync: '2 hours ago', status: 'Pending' },
     ]
   },
   {
@@ -43,7 +89,8 @@ const initialProjects = [
     environments: [
       { id: 'dev', name: 'Development', status: 'Synced', deployedVersion: 'v0.8.0', cluster: 'dev-cluster', lastDeployed: '30 mins ago' },
       { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v0.7.5', cluster: 'prod-genai', lastDeployed: '3 days ago' },
-    ]
+    ],
+    gitRepos: []
   },
   {
     id: 3,
@@ -58,7 +105,10 @@ const initialProjects = [
       { id: 'ds-202', name: 'Augmented Training Images', recordCount: 500000, type: 'Derived', lastUpdated: '1 week ago' },
       { id: 'ds-203', name: 'Validation Images', recordCount: 10000, type: 'Derived', lastUpdated: '1 week ago' },
     ],
-    environments: [] // No environments configured yet
+    environments: [],
+    gitRepos: [
+       { id: 'repo-3', name: 'Classifier Model', url: 'https://gitlab.com/my-research-group/image-classifier', branch: 'feature/new-augmentation', lastSync: '1 day ago', status: 'Error' },
+    ]
   },
    {
     id: 4,
@@ -74,7 +124,8 @@ const initialProjects = [
     ],
     environments: [
        { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v2.0.0', cluster: 'prod-cluster-2', lastDeployed: '1 week ago' },
-    ]
+    ],
+    gitRepos: []
   },
 ];
 
@@ -83,13 +134,16 @@ const getStatusClasses = (status: string) => {
   switch (status.toLowerCase()) {
     case 'active':
     case 'synced':
-      return 'bg-green-100 text-green-800';
+    case 'running':
+      return 'bg-green-100 text-green-800 border border-green-200';
     case 'inactive':
-      return 'bg-gray-100 text-gray-800';
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800 border border-yellow-200';
     case 'error':
-      return 'bg-red-100 text-red-800';
+    case 'failed':
+      return 'bg-red-100 text-red-800 border border-red-200';
     default:
-      return 'bg-yellow-100 text-yellow-800';
+      return 'bg-gray-100 text-gray-800 border border-gray-200';
   }
 };
 
@@ -97,11 +151,11 @@ const getStatusClasses = (status: string) => {
 const getDatasetTypeClasses = (type: string) => {
   switch (type.toLowerCase()) {
     case 'source':
-      return 'border-blue-400 text-blue-700 bg-blue-50';
+      return 'bg-blue-100 text-blue-800 border-blue-200';
     case 'derived':
-      return 'border-purple-400 text-purple-700 bg-purple-50';
+      return 'bg-purple-100 text-purple-800 border-purple-200';
     default:
-      return 'border-gray-400 text-gray-700 bg-gray-50';
+      return 'bg-gray-100 text-gray-800 border-gray-200';
   }
 };
 
@@ -109,14 +163,159 @@ export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id ? parseInt(params.id as string, 10) : null;
   
-  // State for active tab - updated tab options to match the pattern in other pages
   const [activeTab, setActiveTab] = useState('overview');
+  const initialProjectData = initialProjects.find(p => p.id === projectId);
+  
+  // --- State for Environments --- 
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);
+  const [currentEnvironment, setCurrentEnvironment] = useState<Environment | null>(null);
+  const [envId, setEnvId] = useState(''); 
+  const [envName, setEnvName] = useState('');
+  const [envCluster, setEnvCluster] = useState('');
 
-  // Find the project data - Replace with actual data fetching later
-  const project = initialProjects.find(p => p.id === projectId);
+  // --- State for Git Repos --- 
+  const [gitRepos, setGitRepos] = useState<GitRepository[]>([]);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // State for the Link Repo MMI Modal
+  const [isLinkRepoModalOpen, setIsLinkRepoModalOpen] = useState(false);
+  const [repoNameMMI, setRepoNameMMI] = useState('');
+  const [repoUrlMMI, setRepoUrlMMI] = useState('');
+
+  // Effect to initialize states
+  useEffect(() => {
+    if (initialProjectData) {
+      setEnvironments(initialProjectData.environments);
+      setGitRepos(initialProjectData.gitRepos);
+    }
+  }, [initialProjectData]);
+
+  // Effect for closing context menu on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [menuRef]);
+
+  // --- Handlers for Environment CRUD --- 
+  const handleOpenEnvModal = (env: Environment | null = null) => {
+    setCurrentEnvironment(env);
+    if (env) {
+      setEnvId(env.id);
+      setEnvName(env.name);
+      setEnvCluster(env.cluster);
+    } else {
+      setEnvId('');
+      setEnvName('');
+      setEnvCluster('');
+    }
+    setIsEnvModalOpen(true);
+  };
+
+  const handleCloseEnvModal = () => {
+    setIsEnvModalOpen(false);
+    setCurrentEnvironment(null);
+    setEnvId(''); 
+    setEnvName('');
+    setEnvCluster('');
+  };
+
+  const handleSaveEnvironment = (formData: FormData) => {
+    const name = formData.name as string;
+    const cluster = formData.cluster as string;
+    
+    if (!name || !cluster) {
+        alert("Environment Name and Cluster are required.");
+        return; 
+    }
+
+    const newEnvData: Omit<Environment, 'status' | 'deployedVersion' | 'lastDeployed'> = {
+        id: currentEnvironment ? envId : `env-${Date.now()}`, 
+        name: name,
+        cluster: cluster,
+    };
+
+    if (currentEnvironment) {
+        console.log("Updating environment:", newEnvData.id, newEnvData);
+        setEnvironments(prev => prev.map(env => 
+            env.id === currentEnvironment.id ? { ...env, ...newEnvData } : env
+        ));
+    } else {
+        console.log("Adding environment:", newEnvData);
+        const fullNewEnv: Environment = {
+            ...newEnvData,
+            status: 'Pending', 
+            deployedVersion: 'N/A', 
+            lastDeployed: 'Never'
+        }
+        setEnvironments(prev => [...prev, fullNewEnv]);
+    }
+    handleCloseEnvModal();
+  };
+
+  const handleDeleteEnvironment = (idToDelete: string) => {
+    const envToDelete = environments.find(e => e.id === idToDelete);
+    if (window.confirm(`Are you sure you want to delete environment "${envToDelete?.name ?? idToDelete}"?`)) {
+        console.log("Deleting environment:", idToDelete);
+        setEnvironments(prev => prev.filter(env => env.id !== idToDelete));
+    }
+  };
+  // --- End Environment Handlers ---
+
+  // --- Handlers for Git Repo Link MMI --- 
+  const handleOpenLinkRepoModal = () => {
+    setRepoNameMMI(''); // Reset form state for MMI
+    setRepoUrlMMI('');
+    setIsLinkRepoModalOpen(true);
+  };
+
+  const handleCloseLinkRepoModal = () => {
+    setIsLinkRepoModalOpen(false);
+    // Optionally reset MMI form state here too if needed
+  };
+
+  const handleLinkRepositorySubmit = (formData: FormData) => {
+    const name = formData.name as string; // Assuming field names in MMI are 'name' and 'url'
+    const url = formData.url as string;
+    
+    if (!name || !url) {
+      alert("Please fill in all repository details (Name, URL).");
+      return;
+    }
+
+    // Add Logic - Create new repo link
+    const newRepo: GitRepository = {
+      id: `repo-${Date.now()}`,
+      name: name,
+      url: url,
+      branch: 'main', // Defaulting branch as it's not in the UI form anymore
+      status: 'Pending',
+      lastSync: 'Never',
+    };
+    console.log("Linking repository via MMI:", newRepo);
+    setGitRepos(prev => [...prev, newRepo]);
+    handleCloseLinkRepoModal();
+  };
+
+  const handleDeleteRepo = (idToDelete: string) => {
+    const repoToDelete = gitRepos.find(r => r.id === idToDelete);
+    if (window.confirm(`Are you sure you want to unlink repository "${repoToDelete?.name ?? idToDelete}"?`)) {
+        console.log("Deleting repository link:", idToDelete);
+        setGitRepos(prev => prev.filter(repo => repo.id !== idToDelete));
+    }
+  };
+  // --- End Git Repo Handlers ---
+
+  const project = initialProjectData;
 
   if (!project) {
-    // Handle case where project is not found
     return (
         <div className="p-6 text-center">
             <h1 className="text-xl text-red-600">Project Not Found</h1>
@@ -128,22 +327,20 @@ export default function ProjectDetailPage() {
     );
   }
 
-  // Tab definitions including Environments
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart2 },
     { id: 'models', label: 'Models', icon: Package },
     { id: 'datasets', label: 'Datasets', icon: FlaskConical },
     { id: 'environments', label: 'Environments', icon: Server },
+    { id: 'git', label: 'Git Repos', icon: GitBranch },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
-  // Content for each tab
   const renderTabContent = () => {
     switch(activeTab) {
       case 'overview':
         return (
           <div>
-            {/* Project Overview Stats - Use updated project data */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-card p-4 rounded-lg border border-border">
                  <p className="text-xs text-muted-foreground mb-1">Models</p>
@@ -151,7 +348,6 @@ export default function ProjectDetailPage() {
                </div>
                <div className="bg-card p-4 rounded-lg border border-border">
                  <p className="text-xs text-muted-foreground mb-1">Datasets</p>
-                 {/* Display count from updated dataset array */}
                  <h3 className="text-xl font-bold">{project.datasets.length}</h3> 
                </div>
                <div className="bg-card p-4 rounded-lg border border-border">
@@ -159,7 +355,6 @@ export default function ProjectDetailPage() {
                  <h3 className="text-xl font-bold">{project.progress}%</h3>
               </div>
             </div>
-             {/* Progress Bar */}
              <div className="bg-card p-4 rounded-lg border border-border mb-6">
                <p className="text-sm font-medium text-foreground mb-2">Project Progress</p>
                <div className="flex justify-between text-xs mb-1">
@@ -173,7 +368,6 @@ export default function ProjectDetailPage() {
                  ></div>
                </div>
              </div>
-            {/* Recent Activity Placeholder */}
             <div className="bg-card p-4 rounded-lg border border-border">
               <h4 className="text-sm font-medium text-foreground mb-3">Recent Activity</h4>
               <p className="text-xs text-muted-foreground">No recent activity recorded.</p>
@@ -183,7 +377,6 @@ export default function ProjectDetailPage() {
       case 'performance':
         return (
           <div>
-            {/* Key Metrics Section */}
             <div className="bg-white rounded-lg border border-gray-200 mb-6">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900">Key Metrics</h3>
@@ -208,7 +401,6 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
-            {/* Feature Importance */}
             <div className="bg-white rounded-lg border border-gray-200">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900">Feature Importance</h3>
@@ -517,10 +709,8 @@ export default function ProjectDetailPage() {
               </button>
             </div>
 
-            {/* Models List */}
             {project.models > 0 ? (
               <div className="space-y-4">
-                {/* Model Item - Production */}
                 <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <div className="flex items-center">
@@ -560,7 +750,6 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
 
-                {/* Model Item - Development */}
                 <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <div className="flex items-center">
@@ -653,7 +842,6 @@ export default function ProjectDetailPage() {
                          <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{dataset.recordCount.toLocaleString()}</td>
                          <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{dataset.lastUpdated}</td>
                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                           {/* Link to future dataset detail page */}
                            <Link href={`/datasets/${dataset.id}`} className="text-primary hover:text-primary/80">
                              View
                            </Link>
@@ -680,93 +868,337 @@ export default function ProjectDetailPage() {
         );
       case 'environments':
         return (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-medium text-foreground">Project Environments</h3>
-              {/* Button to add/configure might also go here if environments exist */}
-              {project.environments.length > 0 && (
-                 <button type="button" className="inline-flex items-center rounded-md bg-secondary px-3 py-2 text-sm font-semibold text-secondary-foreground shadow-sm hover:bg-secondary/80">
-                   <Settings className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />
-                   Configure Environments
-                 </button>
-              )}
+              <h2 className="text-xl font-medium text-foreground">Deployment Environments</h2>
+              <button 
+                onClick={() => handleOpenEnvModal()} 
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 flex items-center"
+              >
+                <PlusCircle className="w-4 h-4 mr-2" />
+                Add Environment
+              </button>
             </div>
-            {project.environments.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {project.environments.map(env => (
-                  <div key={env.id} className="bg-card p-4 rounded-lg border border-border shadow-sm">
-                    <div className="flex justify-between items-center mb-2">
-                       <h4 className="font-semibold text-foreground">{env.name}</h4>
-                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(env.status)}`}>
-                         {env.status}
-                       </span>
-                    </div>
-                     <p className="text-xs text-muted-foreground mb-1">Cluster: <span className="font-medium text-foreground">{env.cluster}</span></p>
-                     <p className="text-xs text-muted-foreground mb-1">Deployed Version: <span className="font-medium text-foreground">{env.deployedVersion}</span></p>
-                     <p className="text-xs text-muted-foreground">Last Deployed: <span className="font-medium text-foreground">{env.lastDeployed}</span></p>
-                     {/* Add actions like View Details, Deploy, etc. later */}
-                     <div className="mt-3 pt-3 border-t border-border flex justify-end">
-                        <button className="text-xs text-primary hover:underline">View Details</button>
-                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-10 bg-card rounded-lg border border-border">
-                 <Server className="mx-auto h-12 w-12 text-muted-foreground"/>
-                 <h3 className="mt-2 text-sm font-semibold text-foreground">No environments configured</h3>
-                 <p className="mt-1 text-sm text-muted-foreground">Get started by adding a deployment environment for this project.</p>
-                 <div className="mt-6">
-                   <button type="button" className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
-                     <PlusCircle className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
-                     Add Environment
-                   </button>
-                 </div>
+            
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary/50">
+                  <tr>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-left">Name</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-left">Cluster</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-left">Status</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-left">Deployed Version</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-left">Last Deployed</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {environments.length > 0 ? (
+                    environments.map((env: Environment, index: number) => (
+                      <tr key={env.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
+                        <td className="px-4 py-3 font-medium text-foreground">{env.name}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{env.cluster}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(env.status)}`}>
+                            {env.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{env.deployedVersion}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{env.lastDeployed}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end space-x-2">
+                            <button 
+                              onClick={() => handleOpenEnvModal(env)}
+                              className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded"
+                              title="Edit Environment"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteEnvironment(env.id)}
+                              className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+                              title="Delete Environment"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="text-center py-6 text-muted-foreground italic">
+                        No environments configured for this project yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      case 'git':
+        return (
+          <div className="space-y-6">
+             <div className="flex justify-between items-center">
+               <h2 className="text-xl font-medium text-foreground">Linked Git Repositories</h2>
+               <button 
+                 onClick={handleOpenLinkRepoModal}
+                 className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 flex items-center"
+               >
+                 <PlusCircle className="w-4 h-4 mr-2" />
+                 Link Repository
+               </button>
+             </div>
+
+             {gitRepos.length > 0 ? (
+              <div className="bg-card border border-border rounded-lg"> 
+                 <table className="w-full text-sm"> 
+                   <thead className="bg-secondary/50">
+                     <tr>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Name</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">URL</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Status</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Last Sync</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {gitRepos.map((repo: GitRepository, index: number) => (
+                       <tr key={repo.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
+                         <td className="px-4 py-3 align-top font-medium text-foreground truncate">{repo.name}</td> 
+                         <td className="px-4 py-3 align-top text-xs text-muted-foreground truncate" title={repo.url}>{repo.url}</td> 
+                         <td className="px-4 py-3 align-top"> 
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(repo.status)}`}>
+                              {repo.status}
+                            </span>
+                         </td>
+                         <td className="px-4 py-3 text-muted-foreground text-xs align-top truncate">{repo.lastSync}</td> 
+                         
+                         <td className="px-4 py-3 text-right align-top whitespace-nowrap"> 
+                           <div className="relative inline-block text-left"> 
+                             <button 
+                               onClick={() => setOpenMenuId(openMenuId === repo.id ? null : repo.id)}
+                               className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded"
+                               title="Actions"
+                             >
+                               <MoreVertical className="w-4 h-4" />
+                             </button>
+ 
+                             {openMenuId === repo.id && (
+                               <div 
+                                 ref={menuRef}
+                                 className="absolute right-0 top-full mt-1 w-48 bg-background border border-border rounded-md shadow-lg z-10 py-1"
+                               >
+                                 <button 
+                                   onClick={() => { alert('Sync action TBD'); setOpenMenuId(null); }}
+                                   className="flex items-center w-full px-3 py-1.5 text-sm text-foreground hover:bg-secondary text-left"
+                                 >
+                                   <RefreshCw className="w-4 h-4 mr-2" />
+                                   Sync Now
+                                 </button>
+                                 <button 
+                                   onClick={() => { alert('Editing via this menu is not available. Use delete and re-link.'); setOpenMenuId(null); }} 
+                                   className="flex items-center w-full px-3 py-1.5 text-sm text-foreground hover:bg-secondary text-left disabled:opacity-50" 
+                                 >
+                                   <Edit className="w-4 h-4 mr-2" />
+                                   Edit Link...
+                                 </button>
+                                 <div className="my-1 h-px bg-border"></div>
+                                 <button 
+                                   onClick={() => { handleDeleteRepo(repo.id); setOpenMenuId(null); }}
+                                   className="flex items-center w-full px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 text-left"
+                                 >
+                                   <Trash2 className="w-4 h-4 mr-2" />
+                                   Unlink Repository
+                                 </button>
+                               </div>
+                             )}
+                           </div>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
                </div>
-            )}
+             ) : (
+               <div className="bg-card p-6 rounded-lg border border-border text-center">
+                   <GitBranch className="mx-auto h-12 w-12 text-muted-foreground"/>
+                   <h3 className="mt-2 text-sm font-semibold text-foreground">No Git Repositories Linked</h3>
+                   <p className="mt-1 text-sm text-muted-foreground">Link a Git repository to sync code and configurations.</p>
+                   <div className="mt-6">
+                     <button 
+                       onClick={handleOpenLinkRepoModal}
+                       type="button" className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                       <PlusCircle className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
+                       Link Repository
+                     </button>
+                   </div>
+               </div>
+             )}
           </div>
         );
       case 'settings':
-        return (
-          <div className="bg-card p-6 rounded-lg border border-border">
-            <h3 className="text-lg font-medium text-foreground mb-4">Project Settings</h3>
-            <p className="text-sm text-muted-foreground">Settings placeholder...</p>
-          </div>
-        );
+        return <div>Project Settings Placeholder</div>;
       default:
         return <div>Select a tab</div>;
     }
   };
 
+  const envFormFields: UIFormField[] = [
+    {
+      id: 'env-name',
+      name: 'name',
+      label: 'Environment Name',
+      type: 'text',
+      placeholder: 'e.g., Production, Staging, Development',
+      required: true,
+      value: envName,
+      onChange: (value) => setEnvName(String(value)),
+    },
+    {
+      id: 'env-cluster',
+      name: 'cluster',
+      label: 'Target Cluster URL/Name',
+      type: 'text',
+      placeholder: 'e.g., gke_my-project_us-central1-a_prod-cluster',
+      required: true,
+      value: envCluster,
+      onChange: (value) => setEnvCluster(String(value)),
+    },
+  ];
+
+  const getEnvExampleCode = (): CodeExample => {
+    const envIdentifier = (currentEnvironment?.id || envName.toLowerCase().replace(/\s+/g, '-') || 'new-environment');
+    const name = envName || (currentEnvironment ? currentEnvironment.name : '<environment-name>');
+    const cluster = envCluster || (currentEnvironment ? currentEnvironment.cluster : '<cluster-url-or-name>');
+    const action = currentEnvironment ? 'update' : 'add';
+    const commandAction = currentEnvironment ? 'update' : 'add'; // CLI/SDK might use update/add
+
+    // YAML Example
+    const yaml = `apiVersion: your-platform.com/v1alpha1
+kind: ProjectEnvironment
+metadata:
+  name: ${envIdentifier}
+  namespace: project-${projectId} # Assuming namespace convention
+spec:
+  displayName: "${name}"
+  cluster: ${cluster}
+  # Additional config like resource limits, node selectors can go here`;
+
+    // CLI Example
+    const cli = `your-cli project env ${commandAction} --project ${projectId} \
+    ${currentEnvironment ? `--env-id ${envIdentifier}` : ''} \
+    --name "${name}" \
+    --cluster "${cluster}" \
+    # Add other flags as needed: --resource-quota=...`;
+
+    // SDK Example
+    const sdk = `from your_sdk import Client
+
+client = Client()
+project = client.get_project(${projectId})
+
+environment = project.environments.${action}(
+    ${currentEnvironment ? `id='${envIdentifier}',` : ''}
+    name="${name}",
+    cluster="${cluster}"
+    # Add other parameters: resource_quota=...
+)
+
+print(f"${currentEnvironment ? 'Updated' : 'Added'} environment: {environment.name} ({environment.id})")`;
+
+    return { yamlExample: yaml, cliExample: cli, sdkExample: sdk };
+  };
+
+  // --- Git Repo Link MMI Definitions ---
+  const repoFormFields: UIFormField[] = [
+    {
+      id: 'repo-link-name',
+      name: 'name', // Corresponds to key in FormData
+      label: 'Repository Link Name',
+      type: 'text',
+      placeholder: 'e.g., Main Code, Data Processing Scripts',
+      required: true,
+      value: repoNameMMI,
+      onChange: (value) => setRepoNameMMI(String(value)),
+    },
+    {
+      id: 'repo-link-url',
+      name: 'url', // Corresponds to key in FormData
+      label: 'Repository URL',
+      type: 'text', // Changed from 'url' to allow non-standard Git URLs if needed
+      placeholder: 'https://github.com/your-org/your-repo.git',
+      required: true,
+      value: repoUrlMMI,
+      onChange: (value) => setRepoUrlMMI(String(value)),
+    },
+    // Branch field removed from UI
+  ];
+
+  const getRepoExampleCode = (name: string, url: string): CodeExample => {
+    const repoIdentifier = name.toLowerCase().replace(/\s+/g, '-') || 'new-repo-link';
+    const safeUrl = url || '<repository-url>';
+    
+    // YAML Example - Branch removed
+    const yaml = `apiVersion: your-platform.com/v1alpha1 # Using generic API group
+kind: ProjectRepository
+metadata:
+  name: ${repoIdentifier}
+  namespace: project-${projectId}
+spec:
+  displayName: "${name || 'My Repository Link'}"
+  url: ${safeUrl}
+  # secretRef: optional-secret-name`;
+
+    // CLI Example - Branch removed
+    const cli = `your-cli project repo link --project ${projectId} \ 
+    --name "${name || 'my-repo-link'}" \ 
+    --url "${safeUrl}"`;
+
+    // SDK Example - Branch removed
+    const sdk = `from your_sdk import Client # Using generic SDK name
+
+client = Client()
+
+project = client.get_project(${projectId})
+
+repo = project.link_repository(
+    name="${name || 'my-repo-link'}",
+    url="${safeUrl}"
+)
+
+print(f"Linked repository: {repo.name} ({repo.id})")`;
+
+    return { yamlExample: yaml, cliExample: cli, sdkExample: sdk };
+  };
+  // --- End Git Repo Link MMI Definitions ---
+
   return (
     <div className="space-y-6">
-      {/* Enhanced Project Header */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 p-6 bg-card border border-border rounded-lg shadow-sm">
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-foreground mb-1 flex items-center">
-            {project.name}
-            <span className={`ml-3 px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(project.status)}`}>
-              {project.status}
-            </span>
-          </h1>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground mb-1">{project.name}</h1>
           <p className="text-sm text-muted-foreground mb-3">{project.description}</p>
-          <p className="text-xs text-muted-foreground">Last updated: {project.lastUpdated}</p>
+          <div className="flex items-center text-xs text-muted-foreground space-x-4">
+             <span>Last updated: {project.lastUpdated}</span>
+             <span className={`px-2 py-0.5 rounded-full text-xs ${getStatusClasses(project.status)}`}>
+               {project.status}
+             </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 pt-2 md:pt-0">
-          <button className="bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-md flex items-center text-xs font-medium transition-colors">
-            <Pencil className="w-3 h-3 mr-1.5" />
-            Edit Project
-          </button>
-          <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md flex items-center text-xs font-medium transition-colors">
-            <Play className="w-3 h-3 mr-1.5" />
-            Run Pipeline
-          </button>
+        <div className="flex space-x-2 flex-shrink-0 mt-4 md:mt-0">
+            <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 flex items-center">
+                <Play className="w-4 h-4 mr-2" /> Trigger Pipeline
+            </button>
+            <button className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/80 flex items-center">
+                <Pencil className="w-4 h-4 mr-2" /> Edit Project
+            </button>
         </div>
       </div>
 
-      {/* Tab Navigation */}
       <div className="border-b border-border">
-        <nav className="flex -mb-px space-x-6" aria-label="Tabs">
+        <nav className="flex -mb-px space-x-6 overflow-x-auto" aria-label="Tabs">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -784,10 +1216,72 @@ export default function ProjectDetailPage() {
         </nav>
       </div>
 
-      {/* Tab Content Area */}
       <div className="py-4">
-         {renderTabContent()} 
+         {renderTabContent()}
       </div>
+
+      {isEnvModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 backdrop-blur-sm">
+          <div className="bg-background w-full max-w-2xl rounded-lg shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
+             <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
+               <h3 className="text-lg font-semibold text-foreground">
+                 {currentEnvironment ? 'Edit Environment' : 'Add New Environment'}
+               </h3>
+               <button 
+                 className="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"
+                 onClick={handleCloseEnvModal}
+                 title="Close"
+                 aria-label="Close dialog"
+               >
+                 <X className="w-5 h-5" />
+               </button>
+             </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                 <MultiMethodInterface
+                    title={currentEnvironment ? 'Edit Environment' : 'Add New Environment'}
+                    fields={envFormFields} 
+                    getExampleCode={getEnvExampleCode}
+                    onSubmit={handleSaveEnvironment}
+                    submitButtonText={currentEnvironment ? 'Save Changes' : 'Add Environment'}
+                    yamlInstructions="Define the environment configuration as a ProjectEnvironment resource."
+                    cliInstructions={`Use 'your-cli project env ${currentEnvironment ? 'update' : 'add'} ...' to manage environments.`}
+                    sdkInstructions={`Use 'client.projects.environments.${currentEnvironment ? 'update' : 'add'}(...)' in the SDK.`}
+                  />
+              </div>
+          </div>
+        </div>
+      )}
+
+      {isLinkRepoModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 backdrop-blur-sm">
+          <div className="bg-background w-full max-w-2xl rounded-lg shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
+             <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
+               <h3 className="text-lg font-semibold text-foreground">
+                 Link New Git Repository 
+               </h3>
+               <button 
+                 className="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground" 
+                 onClick={handleCloseLinkRepoModal}
+                 title="Close"
+                 aria-label="Close dialog"
+               >
+                 <X className="w-5 h-5" />
+               </button>
+             </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                 <MultiMethodInterface
+                    fields={repoFormFields}
+                    getExampleCode={() => getRepoExampleCode(repoNameMMI, repoUrlMMI)} 
+                    onSubmit={handleLinkRepositorySubmit}
+                    submitButtonText={'Link Repository'}
+                    yamlInstructions="Define a ProjectRepository resource in YAML format."
+                    cliInstructions="Use the command-line tool to link a repository."
+                    sdkInstructions="Use the Python SDK to programmatically link a repository."
+                  />
+              </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 
