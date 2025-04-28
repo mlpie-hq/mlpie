@@ -14,11 +14,12 @@ export type UIFormField = {
   id: string;
   name: string;
   label: string;
-  type: 'text' | 'textarea';
+  type: 'text' | 'textarea' | 'select';
   placeholder: string;
   required?: boolean;
   value: string;
   onChange: (value: string) => void;
+  options?: Array<{value: string; label: string}>;
 };
 
 // Define the shape for the optional tags prop
@@ -32,12 +33,11 @@ type TagHandling = {
 };
 
 type MultiMethodInterfaceProps = {
-  title: string;
+  title?: string;
   fields: UIFormField[];
   getExampleCode: () => CodeExample;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
-  tags?: TagHandling; // Use the defined type
-  submitButtonText?: string;
+  onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
+  tags?: TagHandling;
   yamlInstructions?: string;
   cliInstructions?: string;
   sdkInstructions?: string;
@@ -69,8 +69,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
   fields,
   getExampleCode,
   onSubmit,
-  tags, // Now correctly typed as potentially undefined
-  submitButtonText = 'Submit',
+  tags,
   yamlInstructions = 'Define in YAML and apply with:',
   cliInstructions = 'Use the command-line interface:',
   sdkInstructions = 'Use the Python SDK:',
@@ -102,13 +101,15 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-xl w-full p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold text-gray-800">{title}</h2>
-      </div>
+    <div className="bg-card border border-border rounded-lg shadow-sm w-full p-6">
+      {title && (
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-foreground">{title}</h2>
+        </div>
+      )}
       
       {/* Tab Navigation */}
-      <div className="border-b border-gray-200 mb-6">
+      <div className="border-b border-border mb-6">
         <nav className="flex -mb-px" aria-label="Tabs">
           {['ui', 'yaml', 'cli', 'sdk'].map((tab) => (
             <button
@@ -137,21 +138,24 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
         </nav>
       </div>
       
-      {/* Fixed height container for all tab content */}
-      <div className="h-[460px] flex flex-col relative">
+      {/* REMOVE Fixed height container for all tab content */}
+      {/* Let height be determined by content */}
+      <div className="flex flex-col relative">
         <AnimatePresence mode="wait">
           {/* UI Tab */} 
           {activeTab === 'ui' && (
             <motion.div
               key="ui-tab"
-              className="flex-1 absolute inset-0"
+              // Remove absolute positioning if container height is not fixed
+              className="flex-1"
               variants={tabVariants}
               initial="hidden"
               animate="visible"
               exit="exit"
             >
-              <form onSubmit={onSubmit} className="h-full flex flex-col">
-                <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+              <form onSubmit={onSubmit} className="h-full flex flex-col" id="multi-method-interface-form">
+                 {/* Let this div scroll if content overflows */}
+                <div className="flex-1 overflow-y-auto space-y-4 pb-4 mb-6">
                   {/* Form Fields */}
                   {fields.map((field) => (
                     <div key={field.id}>
@@ -169,6 +173,21 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                           placeholder={field.placeholder}
                         />
+                      ) : field.type === 'select' ? (
+                        <select
+                          id={field.id}
+                          name={field.name}
+                          value={field.value}
+                          onChange={(e) => field.onChange(e.target.value)}
+                          required={field.required}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          {field.options?.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       ) : (
                         <input
                           type="text"
@@ -184,7 +203,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                     </div>
                   ))}
                   
-                  {/* Tags Input (Optional) - Check if tags prop exists */}
+                  {/* Tags Input (Optional) */}
                   {tags && (
                     <div>
                       <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
@@ -192,24 +211,23 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                         <input
                           type="text"
                           id="tagInput"
-                          value={tags.tagInput} // Safe access
-                          onChange={(e) => tags.setTagInput(e.target.value)} // Safe access
-                          onKeyDown={tags.handleTagKeyDown} // Safe access
+                          value={tags.tagInput}
+                          onChange={(e) => tags.setTagInput(e.target.value)}
+                          onKeyDown={tags.handleTagKeyDown}
                           className="flex-grow px-3 py-2 border border-gray-300 rounded-l-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                           placeholder="Add a tag"
                         />
                         <button
                           type="button"
-                          onClick={tags.handleAddTag} // Safe access
+                          onClick={tags.handleAddTag}
                           className="bg-gray-100 px-3 py-2 border border-l-0 border-gray-300 rounded-r-md hover:bg-gray-200"
                         >
                           Add
                         </button>
                       </div>
-                      {/* Display added tags */} 
                       <AnimatePresence>
                         <div className="flex flex-wrap gap-2 mt-2">
-                          {tags.tags.map(tag => ( // Safe access
+                          {tags.tags.map(tag => (
                             <motion.span 
                               key={tag} 
                               className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center"
@@ -221,7 +239,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                               {tag}
                               <button
                                 type="button"
-                                onClick={() => tags.handleRemoveTag(tag)} // Safe access
+                                onClick={() => tags.handleRemoveTag(tag)}
                                 className="ml-1 text-blue-600 hover:text-blue-800"
                               >
                                 ×
@@ -233,18 +251,6 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                     </div>
                   )}
                 </div>
-                
-                {/* Actions - Fixed position at bottom */} 
-                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                  <motion.button
-                    type="submit"
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium"
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
-                  >
-                    {submitButtonText}
-                  </motion.button>
-                </div>
               </form>
             </motion.div>
           )}
@@ -253,7 +259,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
           {activeTab === 'yaml' && (
             <motion.div
               key="yaml-tab" 
-              className="flex-1 flex flex-col absolute inset-0"
+              className="flex-1 flex flex-col"
               variants={tabVariants}
               initial="hidden"
               animate="visible"
@@ -264,8 +270,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                   {yamlInstructions} <code className="bg-gray-100 px-1 py-0.5 rounded">mlpie apply -f resource.yaml</code>
                 </p>
                 
-                {/* Use SyntaxHighlighter with conditional theme */}
-                <div className="flex-1 rounded-md overflow-hidden">
+                <div className="flex-1 rounded-md overflow-hidden overflow-x-auto"> 
                   <SyntaxHighlighter 
                     language="yaml" 
                     style={customStyle} 
@@ -301,7 +306,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
           {activeTab === 'cli' && (
             <motion.div
               key="cli-tab" 
-              className="flex-1 flex flex-col absolute inset-0"
+              className="flex-1 flex flex-col"
               variants={tabVariants}
               initial="hidden"
               animate="visible"
@@ -312,8 +317,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                   {cliInstructions}
                 </p>
                 
-                {/* Use SyntaxHighlighter with conditional theme */}
-                 <div className="flex-1 rounded-md overflow-hidden">
+                <div className="flex-1 rounded-md overflow-hidden overflow-x-auto">
                   <SyntaxHighlighter 
                     language="bash" 
                     style={customStyle} 
@@ -349,7 +353,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
           {activeTab === 'sdk' && (
             <motion.div
               key="sdk-tab" 
-              className="flex-1 flex flex-col absolute inset-0"
+              className="flex-1 flex flex-col"
               variants={tabVariants}
               initial="hidden"
               animate="visible"
@@ -360,8 +364,7 @@ const MultiMethodInterface: React.FC<MultiMethodInterfaceProps> = ({
                   {sdkInstructions}
                 </p>
                 
-                 {/* Use SyntaxHighlighter with conditional theme */}
-                <div className="flex-1 rounded-md overflow-hidden">
+                <div className="flex-1 rounded-md overflow-hidden overflow-x-auto">
                   <SyntaxHighlighter 
                     language="python" 
                     style={customStyle} 

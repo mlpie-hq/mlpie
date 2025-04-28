@@ -600,14 +600,14 @@ function getStatusClass(status: string) {
   }
 }
 
-// Helper function for Dataset Type styling
+// Helper function for Dataset Type styling (Enhanced)
 const getDatasetTypeClasses = (type: string) => {
   if (type === "Source") {
-    return "bg-green-100 text-green-800 border border-green-300";
+    return "bg-green-100 text-green-800 border border-green-200";
   } else if (type === "Derived") {
-    return "bg-purple-100 text-purple-800 border border-purple-300";
+    return "bg-purple-100 text-purple-800 border border-purple-200";
   }
-  return "bg-gray-100 text-gray-800 border border-gray-300"; // Fallback
+  return "bg-gray-100 text-gray-800 border border-gray-200"; // Fallback
 };
 
 // --- React Flow Graph Component --- 
@@ -779,10 +779,15 @@ export default function DatasetDetail() {
           <div>
             <div className="flex items-center space-x-3 mb-1"> {/* Wrap title and type */}
               <h1 className="text-2xl font-semibold">{dataset.name}</h1>
-              {dataset.type && ( // Display dataset type badge
+              {dataset.type && ( // Enhanced dataset type badge with icon
                 <span
-                  className={`px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${getDatasetTypeClasses(dataset.type)}`}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap flex items-center ${getDatasetTypeClasses(dataset.type)}`}
                 >
+                  {dataset.type === "Source" ? (
+                    <Database className="w-3 h-3 mr-1.5" />
+                  ) : (
+                    <GitBranch className="w-3 h-3 mr-1.5" />
+                  )}
                   {dataset.type}
                 </span>
               )}
@@ -916,7 +921,19 @@ export default function DatasetDetail() {
                 <div className="grid grid-cols-2 gap-y-4 text-sm">
                   <div>
                     <div className="text-muted mb-1">Type</div>
-                    <div className="font-medium">{dataset.type || 'N/A'}</div>
+                    <div className="font-medium flex items-center">
+                      {dataset.type === "Source" ? (
+                        <>
+                          <Database className="w-3.5 h-3.5 mr-1.5 text-green-600" />
+                          <span>Source Dataset</span>
+                        </>
+                      ) : (
+                        <>
+                          <GitBranch className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                          <span>Derived Dataset</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <div className="text-muted mb-1">Size</div>
@@ -942,24 +959,76 @@ export default function DatasetDetail() {
                     <div className="text-muted mb-1">Version</div>
                     <div className="font-medium">{dataset.version}</div>
                   </div>
-                  {/* Source Dataset Links (Conditional) - Updated map */}
+                  
+                  {/* Enhanced Source Dataset Links with icons */}
                   {dataset.type === 'Derived' && dataset.sourceDatasetIds && dataset.sourceDatasetIds.length > 0 && (
-                    <div className="col-span-2 mt-2">
-                      <div className="text-muted mb-1">Derived From</div>
+                    <div className="col-span-2 mt-2 pt-2 border-t border-border">
+                      <div className="text-muted mb-2 flex items-center">
+                        <GitBranch className="w-3.5 h-3.5 mr-1.5 text-muted" />
+                        <span>Derived From</span>
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {dataset.sourceDatasetIds.map((sourceId: string) => {
-                          const sourceName = mockDatasets.find(d => d.id === sourceId)?.name;
-                          return sourceName ? (
+                          const sourceDat = mockDatasets.find(d => d.id === sourceId);
+                          return sourceDat ? (
                             <Link
                               key={sourceId}
                               href={`/datasets/${sourceId}`}
-                              className="text-primary hover:underline flex items-center text-sm bg-primary/10 px-2 py-1 rounded"
+                              className="text-primary hover:underline flex items-center text-sm bg-primary/10 px-2.5 py-1.5 rounded-md"
                             >
-                              <ExternalLink className="w-3 h-3 mr-1" />
-                              {sourceName}
+                              <Database className="w-3.5 h-3.5 mr-1.5 text-primary/70" />
+                              <div>
+                                <span className="font-medium">{sourceDat.name}</span>
+                                <span className="text-xs ml-1.5 opacity-75">v{sourceDat.version}</span>
+                              </div>
                             </Link>
                           ) : null;
                         })}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Source Dataset Origin Info (new section) */}
+                  {dataset.type === 'Source' && dataset.lineage && (
+                    <div className="col-span-2 mt-2 pt-2 border-t border-border">
+                      <div className="text-muted mb-2 flex items-center">
+                        <Database className="w-3.5 h-3.5 mr-1.5 text-muted" />
+                        <span>Source Origin</span>
+                      </div>
+                      <div className="px-3 py-2 bg-green-50 text-green-800 border border-green-200 rounded-md text-sm">
+                        <div className="font-medium mb-1">{dataset.lineage.details?.sourceType || 'Data Source'}</div>
+                        <div className="text-xs">
+                          {dataset.lineage.details?.description || 'Original data source, imported directly'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Derived Dataset Processing Info (new section) */}
+                  {dataset.type === 'Derived' && dataset.lineage && (
+                    <div className="col-span-2 mt-2 pt-2 border-t border-border">
+                      <div className="text-muted mb-2 flex items-center">
+                        <Workflow className="w-3.5 h-3.5 mr-1.5 text-muted" />
+                        <span>Processing Origin</span>
+                      </div>
+                      <div className="px-3 py-2 bg-purple-50 text-purple-800 border border-purple-200 rounded-md text-sm">
+                        <div className="font-medium mb-1">
+                          {dataset.lineage.createdBy === 'Pipeline' ? 'Pipeline Process' : dataset.lineage.createdBy}
+                        </div>
+                        {dataset.lineage.pipelineId && (
+                          <div className="text-xs flex items-center mt-1">
+                            <span className="text-purple-700 opacity-75">Pipeline:</span> 
+                            <Link 
+                              href={`/pipelines/${dataset.lineage.pipelineId}`}
+                              className="ml-1 hover:underline text-purple-900"
+                            >
+                              {mockPipelines.find(p => p.id === dataset.lineage.pipelineId)?.name || dataset.lineage.pipelineId}
+                            </Link>
+                          </div>
+                        )}
+                        {dataset.lineage.details?.description && (
+                          <div className="text-xs mt-1">{dataset.lineage.details.description}</div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1051,53 +1120,109 @@ export default function DatasetDetail() {
             
             {/* Right Column - Source & Usage Info */}
             <div className="space-y-6">
-              {/* Source Info Card */}
+              {/* Enhanced Source Info Card */}
               <div className="bg-card border border-border rounded-lg p-5 shadow-card">
-                <h3 className="text-lg font-medium mb-4">Source Information</h3>
-                <div className="mb-3">
-                  {(() => {
-                     const sourceStyles = dataset.source?.type ? sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors] : defaultSourceStyle;
-                     return (
-                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sourceStyles.bg} ${sourceStyles.text}`}>
-                         {dataset.source?.type ?? 'Unknown'}
-                       </span>
-                     );
-                  })()}
-                </div>
-                <div className="text-sm space-y-3">
-                  <div>
-                    <div className="text-muted mb-1">Location</div>
-                    <div className="font-medium break-all">{dataset.source?.location}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted mb-1">Last Synced</div>
-                    <div className="font-medium">{dataset.source?.lastSync}</div>
-                  </div>
-                  
-                  {/* Source Metadata */}
-                  <div className="pt-3 border-t border-border mt-3">
-                    <div className="text-muted mb-2">Source Details</div>
-                    {Object.entries(dataset.source?.metadata || {}).map(([key, value]) => (
-                      <div key={key} className="grid grid-cols-3 gap-1 mb-1 text-sm">
-                        <span className="text-muted capitalize">{key}:</span>
-                        <span className="col-span-2 font-medium">{value as string}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium">Source Information</h3>
+                  {dataset.source?.canSync && (
+                    <button className="bg-secondary hover:bg-secondary/80 text-secondary-foreground px-2 py-1 rounded-md flex items-center text-xs">
+                      <svg className="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 2v6h-6"></path>
+                        <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                        <path d="M3 22v-6h6"></path>
+                        <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+                      </svg>
+                      Sync
+                    </button>
+                  )}
                 </div>
                 
-                {/* Sync Button */}
-                {dataset.source?.canSync && (
-                  <button className="mt-4 w-full bg-secondary hover:bg-secondary/80 text-secondary-foreground px-3 py-2 rounded-md flex items-center justify-center text-sm">
-                    <svg className="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 2v6h-6"></path>
-                      <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
-                      <path d="M3 22v-6h6"></path>
-                      <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
-                    </svg>
-                    Sync Now
-                  </button>
+                {/* Source Type Badge (Enhanced) */}
+                {dataset.source?.type && (
+                  <div className="mb-3">
+                    {(() => {
+                       const sourceStyles = dataset.source?.type 
+                         ? sourceTypeColors[dataset.source.type as keyof typeof sourceTypeColors] 
+                         : defaultSourceStyle;
+                       return (
+                         <div className="flex items-center">
+                           <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${sourceStyles.bg} ${sourceStyles.text} flex items-center`}>
+                             {dataset.type === "Source" ? (
+                               <Database className="w-3 h-3 mr-1.5" />
+                             ) : (
+                               <GitBranch className="w-3 h-3 mr-1.5" />
+                             )}
+                             {dataset.source?.type}
+                           </span>
+                           {dataset.lineage?.type && (
+                             <span className="text-xs text-muted ml-2">
+                               {dataset.lineage.type}
+                             </span>
+                           )}
+                         </div>
+                       );
+                    })()}
+                  </div>
                 )}
+                
+                {/* If no source data is available but lineage exists */}
+                {(!dataset.source || Object.keys(dataset.source).length === 0) && dataset.lineage && (
+                  <div className="border border-border rounded-md p-3 bg-secondary/30 mb-3">
+                    <div className="flex">
+                      <Info className="w-4 h-4 mr-2 text-muted flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium">
+                          {dataset.type === "Source" 
+                            ? "Source dataset imported via direct ingestion" 
+                            : "Derived dataset created through processing"}
+                        </p>
+                        <p className="text-xs text-muted mt-1">
+                          {dataset.lineage.details?.description || 
+                           (dataset.type === "Source" 
+                             ? "Check the Lineage tab for details on data origin"
+                             : "Check the Lineage tab for transformation details")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Source Info Details */}
+                {dataset.source && (
+                  <div className="text-sm space-y-3">
+                    <div>
+                      <div className="text-muted mb-1">Location</div>
+                      <div className="font-medium break-all">{dataset.source?.location}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted mb-1">Last Synced</div>
+                      <div className="font-medium">{dataset.source?.lastSync}</div>
+                    </div>
+                    
+                    {/* Source Metadata */}
+                    <div className="pt-3 border-t border-border mt-3">
+                      <div className="text-muted mb-2">Source Details</div>
+                      {Object.entries(dataset.source?.metadata || {}).map(([key, value]) => (
+                        <div key={key} className="grid grid-cols-3 gap-1 mb-1 text-sm">
+                          <span className="text-muted capitalize">{key}:</span>
+                          <span className="col-span-2 font-medium">{value as string}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Link to Lineage Tab (New) */}
+                <div className="mt-4 pt-3 border-t border-border">
+                  <Link 
+                    href="#" 
+                    onClick={(e) => { e.preventDefault(); setActiveTab('lineage'); }}
+                    className="text-sm text-primary hover:underline flex items-center"
+                  >
+                    <GitBranch className="w-3.5 h-3.5 mr-1.5" />
+                    View Complete Data Lineage
+                  </Link>
+                </div>
               </div>
               
               {/* Usage Trend Card - NEW */}
@@ -1366,6 +1491,42 @@ export default function DatasetDetail() {
                     <strong className="font-medium">Source Dataset:</strong> This dataset is an original source, directly ingested via {dataset.lineage.details?.sourceType || 'unknown mechanism'}.
                   </p>
                 </div>
+
+                {/* Source Details Card (New) */}
+                {dataset.lineage.details && Object.keys(dataset.lineage.details).length > 0 && (
+                  <div className="border border-border rounded-lg p-4">
+                    <h4 className="text-md font-medium mb-3 flex items-center">
+                      <Database className="w-4 h-4 mr-2 text-primary" />
+                      Source Details
+                    </h4>
+                    <div className="text-sm space-y-2">
+                      {dataset.lineage.details.sourceType && (
+                        <p>
+                          <strong className="text-muted w-24 inline-block">Source Type:</strong>
+                          <span className="font-medium">{dataset.lineage.details.sourceType}</span>
+                        </p>
+                      )}
+                      {dataset.lineage.details.location && (
+                        <p>
+                          <strong className="text-muted w-24 inline-block">Location:</strong>
+                          <span className="font-medium">{dataset.lineage.details.location}</span>
+                        </p>
+                      )}
+                      {dataset.lineage.details.table && (
+                        <p>
+                          <strong className="text-muted w-24 inline-block">Table:</strong>
+                          <span className="font-medium">{dataset.lineage.details.table}</span>
+                        </p>
+                      )}
+                      {dataset.lineage.details.description && (
+                        <p>
+                          <strong className="text-muted w-24 inline-block">Description:</strong>
+                          <span>{dataset.lineage.details.description}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1463,13 +1624,48 @@ export default function DatasetDetail() {
               </div>
             )}
 
-            {/* Fallback for missing lineage data */}
-            { !dataset.lineage && (
-              <div className="flex items-center p-4 rounded-md bg-yellow-50 border border-yellow-200">
-                <Info className="w-5 h-5 text-yellow-600 mr-3 flex-shrink-0" />
-                <p className="text-sm text-yellow-800">
-                  <strong className="font-medium">Lineage Unavailable:</strong> Lineage information is not available for this dataset.
-                </p>
+            {/* Fallback for missing lineage data - Enhanced */}
+            {!dataset.lineage && (
+              <div className="space-y-4">
+                <div className="flex items-center p-4 rounded-md bg-yellow-50 border border-yellow-200">
+                  <Info className="w-5 h-5 text-yellow-600 mr-3 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm text-yellow-800 font-medium">
+                      Lineage information is not available for this dataset
+                    </p>
+                    <p className="text-xs text-yellow-700 mt-1">
+                      {dataset.type === "Source" 
+                        ? "Source datasets typically have origin information to track where data was imported from."
+                        : "Derived datasets should have transformation records to track their processing history."}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Lineage Capture Suggestion */}
+                <div className="bg-card border border-border rounded-lg p-4">
+                  <h4 className="text-md font-medium mb-2">Why capture lineage?</h4>
+                  <p className="text-sm text-muted mb-3">
+                    Data lineage helps track the origin, transformations, and flow of data to ensure:
+                  </p>
+                  <ul className="text-sm space-y-2">
+                    <li className="flex items-start">
+                      <span className="text-primary mr-2">•</span>
+                      <span>Transparency in how datasets are created and processed</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-primary mr-2">•</span>
+                      <span>Traceability of data for compliance and audit purposes</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-primary mr-2">•</span>
+                      <span>Impact analysis when source data changes</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-primary mr-2">•</span>
+                      <span>Reproducibility of results and model training</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
             )}
           </div>

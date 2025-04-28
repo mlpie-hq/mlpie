@@ -11,6 +11,7 @@ const breadcrumbNameMap: Record<string, string> = {
   'models': 'Models',
   'datasets': 'Datasets',
   'new': 'New',
+  'create': 'Create',
   // Add more mappings as needed
 };
 

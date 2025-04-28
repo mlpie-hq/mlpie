@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
-// Define source types with their associated colors
+// Re-add sourceTypeColors as it's used in the list rendering
 const sourceTypeColors = {
   "PostgreSQL": { bg: "bg-blue-100", text: "text-blue-800" },
   "S3 Bucket": { bg: "bg-orange-100", text: "text-orange-800" },
@@ -17,11 +17,11 @@ const sourceTypeColors = {
 // Helper function for Dataset Type styling (Copied from detail page)
 const getDatasetTypeClasses = (type: string) => {
   if (type === "Source") {
-    return "bg-green-100 text-green-800 border border-green-300";
+    return "bg-green-100 text-green-800 border border-green-200";
   } else if (type === "Derived") {
-    return "bg-purple-100 text-purple-800 border border-purple-300";
+    return "bg-purple-100 text-purple-800 border border-purple-200";
   }
-  return "bg-gray-100 text-gray-800 border border-gray-300"; // Fallback
+  return "bg-gray-100 text-gray-800 border border-gray-200"; // Fallback
 };
 
 // Dataset data - Updated with Source/Derived types
@@ -159,7 +159,7 @@ export default function Datasets() {
   const [activeTooltip, setActiveTooltip] = useState<number | null>(null);
   const [syncPopup, setSyncPopup] = useState<number | null>(null);
   const [filterSource, setFilterSource] = useState<string | null>(null);
-
+  
   const toggleMenu = (datasetId: number) => {
     if (activeMenu === datasetId) {
       setActiveMenu(null);
@@ -198,13 +198,16 @@ export default function Datasets() {
           <h1 className="font-bold text-foreground mb-1">Datasets</h1>
           <p className="text-sm text-muted">Manage your datasets and use them in model training</p>
         </div>
-        <button className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-md flex items-center justify-center text-sm font-medium transition-colors">
+        <Link 
+          href="/datasets/create"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-md flex items-center justify-center text-sm font-medium transition-colors"
+        >
           <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
           Add New Dataset
-        </button>
+        </Link>
       </div>
 
       {/* Stats Cards */}
