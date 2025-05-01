@@ -30,6 +30,15 @@ const ModelIcon = () => (
   </svg>
 );
 
+const ExperimentIcon = () => (
+  <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 3L8 7.23 12 5l4 2.23L15 3h-6z" />
+    <path d="M20 15a7 7 0 1 0-14 0" />
+    <path d="M12 12v8" />
+    <path d="M8 16h8" />
+  </svg>
+);
+
 const PromptIcon = () => (
   <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -74,6 +83,7 @@ const navItems = [
   { name: 'Projects', href: '/', icon: DashboardIcon },
   { name: 'Pipelines', href: '/pipelines', icon: PipelineIcon },
   { name: 'Models', href: '/models', icon: ModelIcon },
+  { name: 'Experiments', href: '/models/experiments', icon: ExperimentIcon },
   { name: 'Datasets', href: '/datasets', icon: DatasetIcon },
   { name: 'Prompts', href: '/prompts', icon: PromptIcon },
   { name: 'Monitoring', href: '/monitoring', icon: MonitorIcon },
@@ -102,12 +112,13 @@ export default function Sidebar() {
         <ul className="space-y-1">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
+            
             return (
               <li key={item.name}>
                 <Link
                   href={item.href}
                   className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive 
+                    isActive
                       ? 'bg-primary text-primary-foreground' 
                       : 'text-foreground hover:bg-secondary hover:text-foreground'
                   }`}

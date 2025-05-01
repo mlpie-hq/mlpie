@@ -170,7 +170,7 @@ export default function ModelsPage() {
       {/* Combined Header and Controls Section - Refined */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         {/* Title */}
-        <div>
+        <div className="flex items-center space-x-4">
           <h1 className="text-xl font-semibold text-gray-900">All Models</h1> 
         </div>
         
