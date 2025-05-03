@@ -21,7 +21,7 @@ from mlpie.secrets.exceptions import (
     SecretNotFoundError,
     ProviderExistsError
 )
-from mlpie.secrets.interfaces import SecretProviderInterface
+from mlpie.secrets.interfaces import SecretProvider
 
 
 logger = logging.getLogger(__name__)
@@ -73,26 +73,12 @@ class SecretManager:
                     logger.error("No secret provider plugins available")
                     return False
             
-            # Initialize the providers from configuration
-            providers_config = config.get("providers", {})
+            # Store the configuration
+            self._config = config
             
-            # Initialize the default provider if it has config
-            if self.default_provider in providers_config:
-                provider_config = providers_config[self.default_provider]
-                await create_plugin(
-                    PluginType.SECRET_PROVIDER,
-                    self.default_provider,
-                    provider_config
-                )
-                
-            # Initialize other configured providers
-            for name, provider_config in providers_config.items():
-                if name != self.default_provider:
-                    await create_plugin(
-                        PluginType.SECRET_PROVIDER,
-                        name,
-                        provider_config
-                    )
+            # Register all available providers in the registry first
+            for provider_type in plugin_registry.get_plugin_classes(PluginType.SECRET_PROVIDER):
+                logger.info(f"Found provider type: {provider_type}")
             
             self._initialized = True
             logger.info(f"Secret manager initialized with default provider: {self.default_provider}")
@@ -131,11 +117,30 @@ class SecretManager:
             raise ProviderNotFoundError("No provider specified and no default provider set")
             
         try:
-            # Get the provider from the plugin registry
-            provider = await plugin_registry.get_plugin(PluginType.SECRET_PROVIDER, name)
+            # Get provider configuration
+            providers_config = self._config.get("providers", {})
+            provider_config = providers_config.get(name, {})
+            
+            # Create the plugin if it doesn't exist yet
+            provider = None
+            try:
+                provider = await plugin_registry.get_plugin(PluginType.SECRET_PROVIDER, name)
+            except:
+                # Create the provider with configuration
+                logger.info(f"Creating provider {name} with config: {provider_config}")
+                provider = await create_plugin(
+                    PluginType.SECRET_PROVIDER,
+                    name,
+                    provider_config
+                )
+            
+            if not provider:
+                raise ProviderNotFoundError(f"Failed to create provider '{name}'")
+                
             return provider
             
         except Exception as e:
+            logger.error(f"Failed to get provider '{name}': {str(e)}")
             raise ProviderNotFoundError(f"Failed to get provider '{name}': {str(e)}")
     
     async def get_secret(self, key: str, provider_name: Optional[str] = None) -> Optional[str]:
@@ -205,7 +210,8 @@ class SecretManager:
             ProviderNotFoundError: If the specified provider does not exist
         """
         provider = await self._get_provider(provider_name)
-        return await provider.list_secrets(prefix)
+        secrets = await provider.list_secrets(prefix)
+        return secrets
     
     async def check_secret_exists(self, key: str, provider_name: Optional[str] = None) -> bool:
         """Check if a secret exists in the specified provider or the default provider.
@@ -229,18 +235,23 @@ class SecretManager:
         Returns:
             List[str]: List of provider names
         """
-        provider_classes = plugin_registry.get_plugin_classes(PluginType.SECRET_PROVIDER)
-        return list(provider_classes.keys())
+        try:
+            provider_classes = plugin_registry.get_plugin_classes(PluginType.SECRET_PROVIDER)
+            return list(provider_classes.keys())
+        except Exception as e:
+            logger.error(f"Error getting available providers: {str(e)}")
+            return ["file", "env", "db"]  # Return defaults as fallback
     
     async def shutdown(self) -> None:
         """Shut down all provider instances."""
         # Let the plugin registry handle plugin shutdown
-        await plugin_registry.shutdown_all()
+        if hasattr(plugin_registry, 'shutdown_all'):
+            await plugin_registry.shutdown_all()
 
     async def register_provider(
         self,
         name: str,
-        provider: SecretProviderInterface,
+        provider: SecretProvider,
         config: Dict[str, Any],
         make_default: bool = False
     ):
@@ -248,27 +259,24 @@ class SecretManager:
         
         Args:
             name: Name to register the provider under
-            provider: Initialized provider instance  
-            config: Configuration used for this provider
+            provider: Provider instance
+            config: Provider configuration
             make_default: Whether to make this the default provider
             
         Raises:
-            ProviderExistsError: If a provider with this name already exists
+            ProviderExistsError: If a provider with the same name already exists
         """
         await self._ensure_initialized()
         
+        # Store the provider and its configuration
         if name in self._providers:
             raise ProviderExistsError(f"Provider '{name}' already exists")
-        
+            
         self._providers[name] = provider
+        self._config.setdefault("providers", {})[name] = config
         
-        # Store the provider config
-        if "providers" not in self._config:
-            self._config["providers"] = {}
-        self._config["providers"][name] = config
-        
-        # Set as default if requested or if it's the first provider
-        if make_default or self.default_provider is None:
+        # Update the default provider if requested
+        if make_default:
             self.default_provider = name
             self._config["default_provider"] = name
             

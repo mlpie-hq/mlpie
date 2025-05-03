@@ -6,9 +6,15 @@
     "dev": "next dev --turbopack --port 3002",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:e2e": "playwright test",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.50.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "framer-motion": "^12.9.2",
     "lucide-react": "^0.503.0",
@@ -20,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.40.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

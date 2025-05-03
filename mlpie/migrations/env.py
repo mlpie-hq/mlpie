@@ -16,7 +16,7 @@ from alembic import context
 # Import your models here
 from mlpie.db.base import Base
 from mlpie.db.models.config import Configuration, InstalledPlugin
-from mlpie.config import get_settings
+from mlpie.config.manager import get_config_manager
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -28,7 +28,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Get the database connection string from settings
-settings = get_settings()
+settings = get_config_manager().get_root_settings()
 config.set_main_option("sqlalchemy.url", settings.database.DATABASE_URL)
 
 # add your model's MetaData object here

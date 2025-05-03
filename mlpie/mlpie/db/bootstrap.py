@@ -11,11 +11,11 @@ from functools import lru_cache
 from typing import Optional, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-
+from mlpie.config.settings import RootSettings
 logger = logging.getLogger(__name__)
 
 
-def get_db_config_from_env() -> Dict[str, Any]:
+def get_db_config(settings: RootSettings) -> Dict[str, Any]:
     """Get database configuration from environment variables.
     
     Environment variables:
@@ -25,11 +25,8 @@ def get_db_config_from_env() -> Dict[str, Any]:
     Returns:
         Dictionary with database configuration
     """
-    db_url = os.environ.get(
-        "MLPIE_DB_URL", 
-        "sqlite+aiosqlite:///data/mlpie.db"
-    )
-    
+    db_url = settings.database.DATABASE_URL
+
     # Special case for in-memory SQLite database
     if db_url == "sqlite+aiosqlite:///:memory:":
         # Don't modify in-memory path
@@ -53,8 +50,7 @@ def get_db_config_from_env() -> Dict[str, Any]:
     }
 
 
-@lru_cache()
-def create_db_engine() -> AsyncEngine:
+def create_db_engine(settings: RootSettings) -> AsyncEngine:
     """Create the database engine.
     
     This function is separate from the main database connection module
@@ -63,14 +59,16 @@ def create_db_engine() -> AsyncEngine:
     Returns:
         AsyncEngine: SQLAlchemy async engine instance
     """
-    config = get_db_config_from_env()
+    # This function should ideally only be called once by setup_database,
+    # which already ensures single initialization. No need for internal check here.
+    config = settings.database
     
     engine = create_async_engine(
-        config["db_url"],
-        echo=config["db_echo"],
+        config.DATABASE_URL,
+        echo=config.DATABASE_ECHO,
         pool_pre_ping=True,  # Check connection before using it
     )
     
-    logger.info(f"Database engine initialized with URL: {config['db_url']}")
+    logger.info(f"Database engine initialized with URL: {config.DATABASE_URL}")
     
     return engine 

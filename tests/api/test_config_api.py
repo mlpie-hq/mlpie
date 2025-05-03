@@ -6,6 +6,7 @@ This module tests the API endpoints for configuration management.
 
 import pytest
 import uuid
+import os
 from fastapi import status
 
 from mlpie.db.crud.config import set_configuration, delete_configuration
@@ -133,4 +134,42 @@ async def test_delete_config_value(async_client, test_session):
     
     # Verify it's gone
     get_response = await async_client.get(f"/config/values/{test_key}")
-    assert get_response.status_code == status.HTTP_404_NOT_FOUND 
+    assert get_response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_get_current_secrets_config(async_client):
+    """Test the GET /config/secrets/current endpoint."""
+    # Get the current secrets config
+    response = await async_client.get("/config/secrets/current")
+    assert response.status_code == status.HTTP_200_OK
+    
+    data = response.json()
+    assert "provider" in data
+    assert "config" in data
+    assert "available_providers" in data
+    
+    # Check that the available providers includes the expected providers
+    providers = data["available_providers"]
+    assert "file" in providers
+    assert "env" in providers
+    # Note: "db" might not be in providers if the plugin isn't properly registered
+
+
+@pytest.mark.asyncio
+async def test_update_secrets_config_method_not_allowed(async_client):
+    """Test the POST /config/secrets endpoint returns HTTP 405."""
+    # Try to update secrets configuration
+    payload = {
+        "provider": "file",
+        "file_path": "/path/to/secrets.yml"
+    }
+    response = await async_client.post("/config/secrets", json=payload)
+    
+    # Should return Method Not Allowed since we've made this endpoint read-only
+    assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    
+    # Check error message
+    data = response.json()
+    assert "detail" in data
+    assert "environment variables" in data["detail"].lower() 

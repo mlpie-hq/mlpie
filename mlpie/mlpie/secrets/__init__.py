@@ -6,11 +6,12 @@ used throughout the application, such as API keys, passwords, and tokens.
 """
 
 from .manager import SecretManager
-from .interfaces import SecretProviderInterface
+from .interfaces import SecretProvider
 from .factory import (
     create_provider,
     create_file_provider,
     create_env_provider,
+    create_db_provider,
     create_secret_manager,
 )
 from .exceptions import (
@@ -27,10 +28,11 @@ from .setup import (
 
 __all__ = [
     "SecretManager",
-    "SecretProviderInterface",
+    "SecretProvider",
     "create_provider",
     "create_file_provider",
     "create_env_provider",
+    "create_db_provider",
     "create_secret_manager",
     "setup_secret_manager",
     "get_secret_manager",

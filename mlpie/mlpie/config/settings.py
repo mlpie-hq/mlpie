@@ -10,117 +10,64 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
+import logging
 
-class SecuritySettings(BaseSettings):
-    """Security-related settings."""
-    
-    SECRET_KEY: str = Field(
-        default_factory=lambda: os.urandom(32).hex(),
-        description="Secret key for signing tokens"
-    )
-    
-    TOKEN_EXPIRY_MINUTES: int = Field(
-        default=60 * 24,  # 1 day
-        description="Token expiry time in minutes"
-    )
-    
-    ALGORITHM: str = Field(
-        default="HS256",
-        description="Algorithm for JWT token signing"
-    )
+logger = logging.getLogger(__name__)
 
-
-class SecretSettings(BaseSettings):
-    """Secret management settings."""
-    
-    SECRETS_PROVIDER: str = Field(
-        default="file",
-        description="Default secrets provider (file, env, etc.)"
-    )
-    
-    SECRETS_FILE: Path = Field(
-        default=Path("data/secrets.dat"),
-        description="Path to the encrypted secrets file (for file provider)"
-    )
-    
-    SECRETS_PASSWORD: Optional[str] = Field(
-        default=None,
-        description="Password for encrypting secrets (for file provider). If not set, a random one will be generated."
-    )
-    
-    ENV_PREFIX: str = Field(
-        default="MLPIE_SECRET_",
-        description="Prefix for environment variable secrets (for env provider)"
-    )
-    
-    @field_validator("SECRETS_FILE", mode='before')
-    @classmethod
-    def create_absolute_path(cls, v: Any) -> Path:
-        """Convert relative paths to absolute paths."""
-        if isinstance(v, str):
-            v = Path(v)
-        
-        if not v.is_absolute():
-            # Get the project root directory (parent of the mlpie package)
-            root_dir = Path(__file__).parent.parent.parent.parent
-            return root_dir / v
-            
-        return v
-
-
-class GitSettings(BaseSettings):
+class RootGitRepositorySettings(BaseSettings):
     """Git repository settings."""
-    
-    GIT_DEFAULT_BRANCH: str = Field(
-        default="main",
-        description="Default branch for Git repositories"
+
+    model_config = SettingsConfigDict(
+        env_prefix = "GIT__", # Prefix for env vars specific to Git settings
+        case_sensitive=False,
     )
     
-    GIT_USERNAME: str = Field(
+    REPO_URL: str = Field(
+        default="https://github.com/mlpie/mlpie",
+        description="URL of the Git repository"
+    )
+    
+    REPO_USERNAME: str = Field(
         default="mlpie",
         description="Git username for operations"
     )
     
-    GIT_EMAIL: str = Field(
+    REPO_EMAIL: str = Field(
         default="mlpie@example.com",
         description="Git email for operations"
     )
-    
-    GIT_USER_TOKEN_KEY: str = Field(
-        default="git_user_token",
-        description="Key to use for storing Git user token in secrets"
+
+    AUTH_TYPE: str = Field(
+        default="token",
+        description="Authentication type for the Git repository. Valid values are: token, password, ssh_key"
     )
     
-    MASTER_REPO_URL_KEY: str = Field(
-        default="master_repo_url",
-        description="Key to use for storing master repository URL in secrets"
+    # One of the following must be set: personal access token, password, or SSH key
+    REPO_TOKEN: Optional[str] = Field(
+        default=None,
+        description="Git token for operations"
     )
     
-    MASTER_REPO_BRANCH_KEY: str = Field(
-        default="master_repo_branch",
-        description="Key to use for storing master repository branch in secrets"
+    REPO_PASSWORD: Optional[str] = Field(
+        default=None,
+        description="Git password for operations"
     )
     
-    LOCAL_REPOS_DIR: Path = Field(
-        default=Path("data/repositories"),
-        description="Directory for storing local Git repositories"
+    REPO_SSH_KEY: Optional[str] = Field(
+        default=None,
+        description="Git SSH key for operations"
     )
     
-    @field_validator("LOCAL_REPOS_DIR", mode='before')
-    @classmethod
-    def create_absolute_repo_path(cls, v: Any) -> Path:
-        """Convert relative paths to absolute paths."""
-        if isinstance(v, str):
-            v = Path(v)
-        
-        if not v.is_absolute():
-            # Get the project root directory (parent of the mlpie package)
-            root_dir = Path(__file__).parent.parent.parent.parent
-            return root_dir / v
-            
-        return v
+    # Validator (one of the following must be set)
+    @model_validator(mode='after')
+    def validate_repo_credentials(self) -> 'RootGitRepositorySettings':
+        """Validate that at least one repository credential (token, password, or ssh key) is set."""
+        if self.REPO_TOKEN is None and self.REPO_PASSWORD is None and self.REPO_SSH_KEY is None:
+            raise ValueError("One of REPO_TOKEN, REPO_PASSWORD, or REPO_SSH_KEY must be set")
+        return self
+    
 
 
 class DatabaseSettings(BaseSettings):
@@ -156,41 +103,58 @@ class DatabaseSettings(BaseSettings):
 class APISettings(BaseSettings):
     """API server settings."""
     
-    API_HOST: str = Field(
+    model_config = SettingsConfigDict(
+        env_prefix = "API__", # Prefix for env vars specific to API settings
+        case_sensitive=False,
+    )
+    
+    HOST: str = Field(
         default="0.0.0.0",
         description="Host to bind the API server to"
     )
     
-    API_PORT: int = Field(
+    PORT: int = Field(
         default=8000,
         description="Port for the API server"
     )
     
-    API_DEBUG: bool = Field(
+    DEBUG: bool = Field(
         default=False,
         description="Enable debug mode for the API server"
     )
     
-    API_RELOAD: bool = Field(
+    RELOAD: bool = Field(
         default=True,
         description="Enable auto-reload for the API server (development)"
     )
     
-    CORS_ORIGINS: List[str] = Field(
-        default=["*"],
-        description="Allowed CORS origins"
+    # Read CORS origins as a simple string from the env var
+    CORS_ALLOWED_ORIGINS: str = Field(
+        default="http://localhost:3002,http://127.0.0.1:3002",
+        description='Comma-separated string of allowed CORS origins. Use in .env: API__CORS_ALLOWED_ORIGINS="http://localhost:3002,http://127.0.0.1:3002"'
     )
 
 
-class Settings(BaseSettings):
-    """Main application settings."""
+
+class RootSettings(BaseSettings):
+    """
+    Root settings: 
+    The fundamental settings for the application. All of these settings are required,
+    and must be set via environment variables before the application can start.
+    """
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", ".env.local"), 
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         case_sensitive=False,
     )
+
+    # Nested settings
+    git: RootGitRepositorySettings = Field(default_factory=RootGitRepositorySettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    api: APISettings = Field(default_factory=APISettings)
+
     
     # Application info
     APP_NAME: str = Field(
@@ -208,14 +172,20 @@ class Settings(BaseSettings):
         default="development",
         description="Environment (development, production, staging, testing)"
     )
-    
-    # Nested settings
-    security: SecuritySettings = Field(default_factory=SecuritySettings)
-    secrets: SecretSettings = Field(default_factory=SecretSettings)
-    git: GitSettings = Field(default_factory=GitSettings)
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    api: APISettings = Field(default_factory=APISettings)
-    
+
+    # Repository path
+    REPOSITORY_PATH: str = Field(
+        default="./repository",
+        description="Path to the git repository that will be scanned"  
+    )
+
+    # Cronjob settings
+    REPO_SCAN_INTERVAL_SECONDS: int = Field(
+        default=30,
+        description="Interval in seconds for scanning the root repository.",
+        ge=5 # Ensure interval is at least 5 seconds
+    )
+
     # Custom validation
     @field_validator("ENV")
     @classmethod
@@ -242,9 +212,11 @@ class Settings(BaseSettings):
     def is_staging(self) -> bool:
         """Check if running in staging environment."""
         return self.ENV == "staging"
+    
+
 
 
 @lru_cache
-def get_settings() -> Settings:
-    """Get application settings (cached)."""
-    return Settings() 
+def get_root_settings() -> RootSettings:
+    """Get root settings (cached)."""
+    return RootSettings() 

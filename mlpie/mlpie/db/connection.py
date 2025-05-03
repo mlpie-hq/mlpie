@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 # Use the bootstrap module instead of directly importing from config
-from mlpie.db.bootstrap import create_db_engine
-
+from .bootstrap import create_db_engine
+from mlpie.config.settings import RootSettings
 logger = logging.getLogger(__name__)
 
 # Global variables to store engine and session factory
@@ -59,8 +59,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _async_session_factory
 
 
-@lru_cache()
-def setup_database() -> AsyncEngine:
+def setup_database(settings: RootSettings) -> AsyncEngine:
     """Set up the database engine and session factory.
     
     This function should be called at application startup to initialize
@@ -72,7 +71,7 @@ def setup_database() -> AsyncEngine:
     global _engine, _async_session_factory
     
     # Use the bootstrap module to create the engine
-    _engine = create_db_engine()
+    _engine = create_db_engine(settings)
     
     # Create session factory
     _async_session_factory = async_sessionmaker(

@@ -230,15 +230,15 @@ class PluginRegistry:
             
             # Initialize the plugin
             if config is not None:
-                # Validate the configuration
-                validation_errors = await plugin_instance.validate_config(config)
+                # Validate the configuration (Synchronous call)
+                validation_errors = plugin_instance.validate_config(config)
                 if validation_errors:
                     error_messages = "; ".join(f"{key}: {msg}" for key, msg in validation_errors.items())
                     raise PluginInitializationError(
                         f"Invalid configuration for plugin '{plugin_name}': {error_messages}"
                     )
                 
-                # Initialize with the validated configuration
+                # Initialize with the validated configuration (Asynchronous call)
                 success = await plugin_instance.initialize(config)
                 if not success:
                     raise PluginInitializationError(
@@ -251,11 +251,12 @@ class PluginRegistry:
             return plugin_instance
             
         except Exception as e:
-            if not isinstance(e, PluginInitializationError):
-                raise PluginInitializationError(
-                    f"Failed to create plugin '{plugin_name}': {str(e)}"
-                ) from e
-            raise
+            logger.error(f"Error getting plugin '{plugin_name}': {str(e)}")
+            if isinstance(e, PluginInitializationError):
+                raise
+            raise PluginInitializationError(
+                f"Failed to create or initialize plugin '{plugin_name}': {str(e)}"
+            ) from e
     
     async def shutdown_all(self) -> None:
         """Shutdown all plugin instances."""

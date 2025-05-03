@@ -9,6 +9,9 @@ from mlpie.api.schemas.config import (
     ConfigValueRequest,
     ConfigListResponse,
     StatusResponse,
+    RootSettingsResponse,
+    DatabaseSettingsResponse,
+    APISettingsResponse,
 )
 
 from mlpie.api.schemas.plugin import (

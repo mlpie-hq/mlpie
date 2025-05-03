@@ -7,9 +7,9 @@ It's useful for containerized deployments and cloud environments.
 
 import os
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from mlpie.secrets.interfaces import SecretProviderInterface
+from mlpie.secrets.interfaces import SecretProvider
 from mlpie.secrets.exceptions import (
     SecretError,
     SecretNotFoundError,
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 @register_plugin
-class EnvSecretProvider(SecretProviderInterface, Plugin):
+class EnvSecretProvider(SecretProvider, Plugin):
     """Environment Variable Secret Provider.
     
     This provider uses environment variables for storing secrets.
@@ -41,64 +41,53 @@ class EnvSecretProvider(SecretProviderInterface, Plugin):
         capabilities=["environment"],
     )
     
-    def __init__(self):
+    def __init__(self, config: Dict[str, Any] = None):
         """Initialize the environment secret provider."""
         Plugin.__init__(self)
+        self.config = config or {}
         self.prefix: str = ""
         self.initialized = False
     
-    async def validate_config(self, config: Dict[str, Any]) -> Dict[str, str]:
-        """Validate the plugin configuration.
-        
-        Args:
-            config: Configuration to validate
-            
-        Returns:
-            Dict[str, str]: Dictionary of validation errors, empty if valid
-        """
-        # No validation needed for environment provider
-        return {}
+    @property
+    def name(self) -> str:
+        """Get the provider name."""
+        return "env"
     
-    async def initialize(self, config: Dict[str, Any]) -> bool:
+    async def initialize(self):
         """Initialize the environment secret provider with configuration.
         
-        Args:
-            config: Configuration dictionary with optional keys:
-                - prefix: Prefix for environment variable names (default: "MLPIE_SECRET_")
-        
-        Returns:
-            bool: True if initialization was successful
+        Raises:
+            ProviderInitializationError: If initialization fails
         """
         try:
-            # Store the configuration
-            self.config = config
-            
             # Get the prefix, defaulting to "MLPIE_SECRET_"
-            self.prefix = config.get("prefix", "MLPIE_SECRET_")
+            self.prefix = self.config.get("prefix", "MLPIE_SECRET_")
             
             self.initialized = True
             logger.info(f"Initialized environment secret provider with prefix: {self.prefix}")
-            return True
             
         except Exception as e:
             logger.error(f"Failed to initialize environment secret provider: {str(e)}")
             raise ProviderInitializationError(f"Failed to initialize environment secret provider: {str(e)}")
     
-    async def get_secret(self, key: str) -> Optional[str]:
+    async def get_secret(self, key: str, namespace: str = "default") -> Optional[Any]:
         """Retrieve a secret value by its key.
         
         Args:
             key: Unique identifier for the secret
+            namespace: Secret namespace (prefixed to the key)
             
         Returns:
             str or None: The secret value if found, None otherwise
         """
         self._ensure_initialized()
         
-        env_var_name = self._get_env_var_name(key)
+        # Combine namespace and key
+        full_key = f"{namespace}_{key}" if namespace != "default" else key
+        env_var_name = self._get_env_var_name(full_key)
         return os.environ.get(env_var_name)
     
-    async def set_secret(self, key: str, value: str) -> bool:
+    async def set_secret(self, key: str, value: Any, namespace: str = "default") -> bool:
         """Store a secret value.
         
         Note: This method sets the environment variable for the current process only.
@@ -107,29 +96,40 @@ class EnvSecretProvider(SecretProviderInterface, Plugin):
         Args:
             key: Unique identifier for the secret
             value: The secret value to store
+            namespace: Secret namespace (prefixed to the key)
             
         Returns:
             bool: True if the secret was stored successfully
         """
         self._ensure_initialized()
         
-        env_var_name = self._get_env_var_name(key)
+        # Combine namespace and key
+        full_key = f"{namespace}_{key}" if namespace != "default" else key
+        env_var_name = self._get_env_var_name(full_key)
+        
+        # Convert to string if not already
+        if not isinstance(value, str):
+            value = str(value)
+            
         os.environ[env_var_name] = value
         logger.debug(f"Set environment variable {env_var_name}")
         return True
     
-    async def delete_secret(self, key: str) -> bool:
+    async def delete_secret(self, key: str, namespace: str = "default") -> bool:
         """Delete a secret.
         
         Args:
             key: Unique identifier for the secret to delete
+            namespace: Secret namespace (prefixed to the key)
             
         Returns:
             bool: True if the secret was deleted successfully
         """
         self._ensure_initialized()
         
-        env_var_name = self._get_env_var_name(key)
+        # Combine namespace and key
+        full_key = f"{namespace}_{key}" if namespace != "default" else key
+        env_var_name = self._get_env_var_name(full_key)
         
         if env_var_name in os.environ:
             del os.environ[env_var_name]
@@ -138,48 +138,38 @@ class EnvSecretProvider(SecretProviderInterface, Plugin):
         
         return False
     
-    async def list_secrets(self, prefix: Optional[str] = None) -> Dict[str, str]:
-        """List available secrets, optionally filtered by prefix.
+    async def list_secrets(self, namespace: str = "default") -> List[str]:
+        """List available secrets in the given namespace.
         
         Args:
-            prefix: Optional prefix to filter keys
+            namespace: Secret namespace
             
         Returns:
-            dict: Dictionary of key-value pairs of secrets
+            List[str]: List of secret keys in the namespace
         """
         self._ensure_initialized()
         
-        result = {}
+        result = []
         
         # Full prefix for environment variables
         env_prefix = self.prefix
         
-        # Add the additional prefix if specified
-        if prefix:
-            env_prefix = f"{env_prefix}{prefix}"
+        # Add the namespace if not default
+        if namespace != "default":
+            env_prefix = f"{env_prefix}{namespace}_"
         
         # Find all matching environment variables
-        for key, value in os.environ.items():
+        for key in os.environ:
             if key.startswith(env_prefix):
                 # Remove the prefix to get the actual key
-                secret_key = key[len(self.prefix):]
-                result[secret_key] = value
+                if namespace != "default":
+                    # Remove namespace_ as well
+                    secret_key = key[len(env_prefix):]
+                else:
+                    secret_key = key[len(self.prefix):]
+                result.append(secret_key)
         
         return result
-    
-    async def check_secret_exists(self, key: str) -> bool:
-        """Check if a secret exists.
-        
-        Args:
-            key: Secret key to check
-            
-        Returns:
-            bool: True if the secret exists
-        """
-        self._ensure_initialized()
-        
-        env_var_name = self._get_env_var_name(key)
-        return env_var_name in os.environ
     
     def _get_env_var_name(self, key: str) -> str:
         """Convert a secret key to an environment variable name.

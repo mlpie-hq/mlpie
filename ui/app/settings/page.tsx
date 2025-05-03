@@ -1,14 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { User, Bell, KeyRound, Palette, ShieldCheck, GitBranch } from "lucide-react"; // Removed CreditCard
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResult } from "@tanstack/react-query";
+import { 
+  configService, 
+  SecretProviderConfigPayload, 
+  CurrentSecretConfigResponse, 
+  ConfigResponse, 
+  RootSettingsResponse // Import the new response type
+} from "@/services/configService"; // Adjust path
+import { User, Bell, KeyRound, Palette, ShieldCheck, GitBranch, HardDrive } from "lucide-react"; // Replace Key with HardDrive for Base
 
 // Define settings sections
 const settingsSections = [
+  { key: 'base', label: 'Base', icon: HardDrive },
   { key: 'profile', label: 'Profile', icon: User },
+  { key: 'masterRepo', label: 'Master Repository', icon: GitBranch },
   { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'apiKeys', label: 'API Keys', icon: KeyRound },
-  { key: 'masterRepo', label: 'Master Repository', icon: GitBranch },
   { key: 'appearance', label: 'Appearance', icon: Palette },
   { key: 'security', label: 'Security', icon: ShieldCheck },
   // Add more sections as needed
@@ -87,15 +96,85 @@ const ApiKeySettings = () => (
   </div>
 );
 
-/* // Removed BillingSettings component
-const BillingSettings = () => (
-  <div>
-    <h2 className="text-xl font-semibold mb-4">Billing</h2>
-    <p className="text-gray-600">View subscription details, payment methods, and invoices.</p>
-    <div className="mt-6 text-sm text-gray-500">(Billing information placeholder)</div>
-  </div>
-);
-*/
+// NEW Base Settings Component
+const BaseSettings = () => {
+  const { 
+    data: rootSettings, 
+    isLoading, 
+    error 
+  }: UseQueryResult<RootSettingsResponse, Error> = useQuery<RootSettingsResponse, Error>({
+    queryKey: ['rootConfig'],
+    queryFn: configService.getRootConfig,
+    staleTime: Infinity, // Root settings are unlikely to change while app is running
+    refetchOnWindowFocus: false,
+  });
+
+  if (isLoading) {
+    return <div>Loading base settings...</div>; 
+  }
+
+  if (error) {
+    return <div className="text-red-600">Error loading base settings: {error.message}</div>;
+  }
+
+  if (!rootSettings) {
+    return <div>No base settings found.</div>;
+  }
+
+  // Helper to render key-value pairs
+  const renderSetting = (label: string, value: string | number | boolean) => (
+    <div key={label} className="py-2 sm:grid sm:grid-cols-3 sm:gap-4">
+      <dt className="text-sm font-medium text-gray-500">{label}</dt>
+      <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{String(value)}</dd>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold mb-4">Base Configuration</h2>
+      <p className="text-gray-600 mb-6">Core application settings (read-only).</p>
+      
+      <div className="border-t border-gray-200 pt-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Application Info</h3>
+        <dl className="divide-y divide-gray-200">
+          {renderSetting("Application Name", rootSettings.APP_NAME)}
+          {renderSetting("Application Version", rootSettings.APP_VERSION)}
+          {renderSetting("Environment", rootSettings.ENV)}
+        </dl>
+      </div>
+
+      <div className="border-t border-gray-200 pt-6 mt-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">API Settings</h3>
+        <dl className="divide-y divide-gray-200">
+          {renderSetting("Host", rootSettings.api.HOST)}
+          {renderSetting("Port", rootSettings.api.PORT)}
+          {renderSetting("Debug Mode", rootSettings.api.DEBUG)}
+          {renderSetting("Auto Reload", rootSettings.api.RELOAD)}
+          {renderSetting("CORS Allowed Origins", rootSettings.api.CORS_ALLOWED_ORIGINS)}
+        </dl>
+      </div>
+
+      <div className="border-t border-gray-200 pt-6 mt-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Git Repository Settings</h3>
+        <dl className="divide-y divide-gray-200">
+          {renderSetting("Repository URL", rootSettings.git.REPO_URL)}
+          {renderSetting("Username", rootSettings.git.REPO_USERNAME)}
+          {renderSetting("Email", rootSettings.git.REPO_EMAIL)}
+          {renderSetting("Auth Type", rootSettings.git.AUTH_TYPE)}
+        </dl>
+      </div>
+
+      <div className="border-t border-gray-200 pt-6 mt-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Database Settings</h3>
+        <dl className="divide-y divide-gray-200">
+          {renderSetting("Echo SQL", rootSettings.database.DATABASE_ECHO)}
+          {/* DATABASE_URL is intentionally omitted */}
+        </dl>
+      </div>
+
+    </div>
+  );
+};
 
 const AppearanceSettings = () => (
   <div>
@@ -168,7 +247,7 @@ const MasterRepoSettings = () => (
 );
 
 export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState(settingsSections[0].key);
+  const [activeSection, setActiveSection] = useState('profile');
 
   const renderSection = () => {
     switch (activeSection) {
@@ -178,10 +257,10 @@ export default function SettingsPage() {
         return <NotificationSettings />;
       case 'apiKeys':
         return <ApiKeySettings />;
+      case 'base':
+        return <BaseSettings />;
       case 'masterRepo':
         return <MasterRepoSettings />;
-      /* case 'billing': // Removed Billing case
-        return <BillingSettings />; */
       case 'appearance':
         return <AppearanceSettings />;
       case 'security':
@@ -192,7 +271,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="mx-auto">
        <h1 className="text-2xl font-semibold mb-6">Settings</h1>
        {/* Tab Navigation */}
        <div className="border-b border-gray-200 mb-6">

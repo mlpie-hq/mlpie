@@ -11,12 +11,12 @@ import json
 import base64
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from mlpie.secrets.interfaces import SecretProviderInterface
+from mlpie.secrets.interfaces import SecretProvider
 from mlpie.secrets.exceptions import (
     SecretError, 
     SecretNotFoundError,
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 @register_plugin
-class FileSecretProvider(SecretProviderInterface, Plugin):
+class FileSecretProvider(SecretProvider, Plugin):
     """File-based Secret Provider that stores secrets in an encrypted file."""
     
     # Plugin metadata
@@ -43,85 +43,89 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
         capabilities=["storage", "encryption"],
     )
     
-    def __init__(self):
+    def __init__(self, config: Dict[str, Any] = None):
         """Initialize the file secret provider."""
         Plugin.__init__(self)
+        self.config = config or {}
         self.file_path: Optional[Path] = None
         self.encryption_key: Optional[bytes] = None
-        self.secrets: Dict[str, str] = {}
+        self.secrets: Dict[str, Dict[str, Any]] = {}
         self.initialized = False
     
-    async def validate_config(self, config: Dict[str, Any]) -> Dict[str, str]:
-        """Validate the plugin configuration.
-        
-        Args:
-            config: Configuration to validate
-            
-        Returns:
-            Dict[str, str]: Dictionary of validation errors, empty if valid
-        """
-        errors = {}
-        
-        # Check for required file_path
-        if "file_path" not in config:
-            errors["file_path"] = "file_path is required"
-            
-        # Additional validation for file path
-        file_path = config.get("file_path")
-        if file_path:
-            try:
-                # Convert to Path object
-                path = Path(file_path)
-                
-                # Check if directory is writable
-                if path.exists() and not os.access(path, os.W_OK):
-                    errors["file_path"] = "File exists but is not writable"
-                elif not path.exists():
-                    # Check if parent directory exists and is writable
-                    parent = path.parent
-                    if not parent.exists():
-                        try:
-                            parent.mkdir(parents=True, exist_ok=True)
-                        except Exception as e:
-                            errors["file_path"] = f"Cannot create directory: {str(e)}"
-                    elif not os.access(parent, os.W_OK):
-                        errors["file_path"] = "Parent directory is not writable"
-            except Exception as e:
-                errors["file_path"] = f"Invalid file path: {str(e)}"
-                
-        return errors
+    @property
+    def name(self) -> str:
+        """Get the provider name."""
+        return "file"
     
-    async def initialize(self, config: Dict[str, Any]) -> bool:
+    @property
+    def schema(self) -> Dict[str, Any]:
+        """Get the schema for UI configuration."""
+        return {
+            "title": "File Secret Provider",
+            "description": "Stores secrets in an encrypted file",
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "title": "File Path",
+                    "description": "Path to the encrypted secrets file"
+                },
+                "password": {
+                    "type": "string",
+                    "title": "Encryption Password",
+                    "description": "Password used for encrypting the file (generated if not provided)",
+                    "format": "password"
+                }
+            },
+            "required": ["file_path"]
+        }
+    
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate the provider configuration."""
+        if not config:
+            raise SecretError("Configuration is required")
+            
+        if "file_path" not in config:
+            raise SecretError("file_path is required")
+            
+        # Validate file path
+        file_path = config.get("file_path")
+        try:
+            path = Path(file_path)
+            if path.exists() and not os.access(path, os.W_OK):
+                raise SecretError("File exists but is not writable")
+            
+            # Check if parent directory is writable
+            parent = path.parent
+            if parent.exists() and not os.access(parent, os.W_OK):
+                raise SecretError("Parent directory is not writable")
+        except Exception as e:
+            if isinstance(e, SecretError):
+                raise
+            raise SecretError(f"Invalid file path: {str(e)}")
+            
+        return config
+    
+    async def initialize(self):
         """Initialize the file secret provider with configuration.
-        
-        Args:
-            config: Configuration dictionary with:
-                - file_path: Path to the secrets file
-                - password: Password for encryption (or generate one if not provided)
-                - salt: Salt for key derivation (or generate one if not provided)
-        
-        Returns:
-            bool: True if initialization was successful
         
         Raises:
             ProviderInitializationError: If initialization fails
         """
         try:
-            # Store the configuration
-            self.config = config
-            
             # Get the file path
-            file_path = config.get("file_path")
+            file_path = self.config.get("file_path")
             if not file_path:
                 raise ProviderInitializationError("file_path is required")
                 
             self.file_path = Path(file_path)
             
             # Get or generate the password
-            password = config.get("password", os.urandom(32).hex())
+            password = self.config.get("password", os.urandom(32).hex())
             
             # Get or generate the salt
-            salt = config.get("salt")
+            salt = self.config.get("salt")
             if salt:
                 if isinstance(salt, str):
                     salt = salt.encode()
@@ -142,20 +146,20 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
             
             self.initialized = True
             logger.info(f"Initialized file secret provider with file: {self.file_path}")
-            return True
             
         except Exception as e:
             logger.error(f"Failed to initialize file secret provider: {str(e)}")
             raise ProviderInitializationError(f"Failed to initialize file secret provider: {str(e)}")
     
-    async def get_secret(self, key: str) -> Optional[str]:
+    async def get_secret(self, key: str, namespace: str = "default") -> Optional[Any]:
         """Retrieve a secret value by its key.
         
         Args:
             key: Unique identifier for the secret
+            namespace: Secret namespace
             
         Returns:
-            str or None: The secret value if found, None otherwise
+            Any or None: The secret value if found, None otherwise
         
         Raises:
             SecretAccessError: If there's an error accessing the secret
@@ -166,17 +170,20 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
         await self._load_secrets()
         
         try:
-            return self.secrets.get(key)
+            # Get the namespace dictionary
+            namespace_dict = self.secrets.get(namespace, {})
+            return namespace_dict.get(key)
         except Exception as e:
             logger.error(f"Error retrieving secret {key}: {str(e)}")
             raise SecretAccessError(f"Error retrieving secret {key}: {str(e)}")
     
-    async def set_secret(self, key: str, value: str) -> bool:
+    async def set_secret(self, key: str, value: Any, namespace: str = "default") -> bool:
         """Store a secret value.
         
         Args:
             key: Unique identifier for the secret
-            value: The secret value to store
+            value: The secret value to store (must be JSON serializable)
+            namespace: Secret namespace
             
         Returns:
             bool: True if the secret was stored successfully
@@ -187,24 +194,29 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
         self._ensure_initialized()
         
         try:
+            # Make sure the namespace exists
+            if namespace not in self.secrets:
+                self.secrets[namespace] = {}
+                
             # Update in-memory secrets
-            self.secrets[key] = value
+            self.secrets[namespace][key] = value
             
             # Save to file
             await self._save_secrets()
             
-            logger.debug(f"Secret {key} stored successfully")
+            logger.debug(f"Secret {key} stored successfully in namespace {namespace}")
             return True
             
         except Exception as e:
             logger.error(f"Error storing secret {key}: {str(e)}")
             raise SecretAccessError(f"Error storing secret {key}: {str(e)}")
     
-    async def delete_secret(self, key: str) -> bool:
+    async def delete_secret(self, key: str, namespace: str = "default") -> bool:
         """Delete a secret.
         
         Args:
             key: Unique identifier for the secret to delete
+            namespace: Secret namespace
             
         Returns:
             bool: True if the secret was deleted successfully
@@ -215,32 +227,41 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
         self._ensure_initialized()
         
         try:
+            # Check if the namespace exists
+            if namespace not in self.secrets:
+                logger.warning(f"Namespace {namespace} not found for deletion")
+                return False
+                
             # Check if the secret exists
-            if key not in self.secrets:
-                logger.warning(f"Secret {key} not found for deletion")
+            if key not in self.secrets[namespace]:
+                logger.warning(f"Secret {key} not found in namespace {namespace} for deletion")
                 return False
                 
             # Remove from in-memory secrets
-            del self.secrets[key]
+            del self.secrets[namespace][key]
+            
+            # Remove empty namespace
+            if not self.secrets[namespace]:
+                del self.secrets[namespace]
             
             # Save to file
             await self._save_secrets()
             
-            logger.debug(f"Secret {key} deleted successfully")
+            logger.debug(f"Secret {key} deleted successfully from namespace {namespace}")
             return True
             
         except Exception as e:
             logger.error(f"Error deleting secret {key}: {str(e)}")
             raise SecretAccessError(f"Error deleting secret {key}: {str(e)}")
     
-    async def list_secrets(self, prefix: Optional[str] = None) -> Dict[str, str]:
-        """List available secrets, optionally filtered by prefix.
+    async def list_secrets(self, namespace: str = "default") -> List[str]:
+        """List all secret keys in the given namespace.
         
         Args:
-            prefix: Optional prefix to filter keys
+            namespace: Secret namespace
             
         Returns:
-            dict: Dictionary of key-value pairs of secrets
+            List[str]: List of secret keys
         
         Raises:
             SecretAccessError: If there's an error listing secrets
@@ -251,38 +272,13 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
         await self._load_secrets()
         
         try:
-            if prefix:
-                return {k: v for k, v in self.secrets.items() if k.startswith(prefix)}
-            else:
-                return dict(self.secrets)
+            # Get the namespace dictionary
+            namespace_dict = self.secrets.get(namespace, {})
+            return list(namespace_dict.keys())
                 
         except Exception as e:
             logger.error(f"Error listing secrets: {str(e)}")
             raise SecretAccessError(f"Error listing secrets: {str(e)}")
-    
-    async def check_secret_exists(self, key: str) -> bool:
-        """Check if a secret exists.
-        
-        Args:
-            key: Secret key to check
-            
-        Returns:
-            bool: True if the secret exists
-        
-        Raises:
-            SecretAccessError: If there's an error checking for the secret
-        """
-        self._ensure_initialized()
-        
-        try:
-            # Refresh secrets from the file
-            await self._load_secrets()
-            
-            return key in self.secrets
-            
-        except Exception as e:
-            logger.error(f"Error checking secret existence {key}: {str(e)}")
-            raise SecretAccessError(f"Error checking secret existence {key}: {str(e)}")
     
     async def _load_secrets(self) -> None:
         """Load secrets from the encrypted file."""
@@ -305,7 +301,14 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
             
             # Parse the JSON data
             self.secrets = json.loads(decrypted_data.decode())
-            logger.debug(f"Loaded {len(self.secrets)} secrets from {self.file_path}")
+            
+            # Ensure the structure is correct (migrate old format if needed)
+            if self.secrets and not any(isinstance(v, dict) for v in self.secrets.values()):
+                # Old format was a flat dictionary, convert to namespaced
+                old_secrets = self.secrets
+                self.secrets = {"default": old_secrets}
+            
+            logger.debug(f"Loaded secrets from {self.file_path} with {len(self.secrets)} namespaces")
             
         except Exception as e:
             logger.error(f"Error loading secrets: {str(e)}")
@@ -327,7 +330,9 @@ class FileSecretProvider(SecretProviderInterface, Plugin):
             
             # Write to file
             self.file_path.write_bytes(encrypted_data)
-            logger.debug(f"Saved {len(self.secrets)} secrets to {self.file_path}")
+            
+            total_secrets = sum(len(secrets) for secrets in self.secrets.values())
+            logger.debug(f"Saved {total_secrets} secrets to {self.file_path}")
             
         except Exception as e:
             logger.error(f"Error saving secrets: {str(e)}")

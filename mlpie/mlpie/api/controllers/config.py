@@ -4,15 +4,17 @@ Configuration Management API Controllers.
 This module provides API controllers for configuration management.
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, Dict, List
 from uuid import UUID
+import os
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mlpie.db.connection import get_session
-from mlpie.config import get_config_manager
+from mlpie.config import get_config_manager, get_root_settings
 from mlpie.plugins.base import PluginType
 from mlpie.api.schemas import (
     ConfigValueResponse,
@@ -23,7 +25,11 @@ from mlpie.api.schemas import (
     PluginListResponse,
     PluginConfigRequest,
     PluginSyncResponse,
+    RootSettingsResponse,
 )
+from pydantic import BaseModel, Field
+from mlpie.secrets.setup import setup_secret_manager
+from mlpie.utils.logger import logger
 
 
 router = APIRouter(prefix="/config", tags=["Configuration"])
@@ -256,4 +262,113 @@ async def sync_plugins(
         added=stats["added"],
         updated=stats["updated"],
         removed=stats["removed"]
-    ) 
+    )
+
+
+# Secret provider API models
+class SecretProviderConfig(BaseModel):
+    """Configuration for a secret provider."""
+    provider: str = Field(..., description="Secret provider type (file, env, db)")
+    file_path: Optional[str] = Field(None, description="Path to secrets file (for file provider)")
+    encryption_password: Optional[str] = Field(None, description="Password for encryption (for file provider)")
+    env_prefix: Optional[str] = Field(None, description="Environment variable prefix (for env provider)")
+
+
+class ConfigResponse(BaseModel):
+    """Response model for configuration operations."""
+    success: bool
+    message: str
+
+
+class CurrentSecretConfigResponse(BaseModel):
+    """Response model for current secret provider configuration."""
+    provider: str
+    config: Dict[str, Any]
+    available_providers: List[str]
+
+
+# Secret provider API endpoints
+@router.get("/secrets/current", response_model=CurrentSecretConfigResponse)
+async def get_current_secrets_config():
+    """Get the current secret provider configuration.
+    
+    This endpoint returns the active secret provider type and its configuration,
+    as well as the list of available providers. These settings can only be 
+    changed via environment variables before application startup.
+    """
+    try:
+        # Get provider type from env vars or settings
+        settings = get_settings()
+        
+        # Get provider from environment variable or settings
+        provider_type = os.environ.get(
+            "MLPIE_SECRETS_PROVIDER",
+            settings.secrets.SECRETS_PROVIDER or "file"
+        )
+        
+        # Get config based on provider type
+        config = {}
+        
+        if provider_type == "file":
+            # Get file path from environment or settings
+            file_path = os.environ.get(
+                "MLPIE_SECRETS_FILE",
+                str(settings.secrets.SECRETS_FILE)
+            )
+            config["file_path"] = file_path
+            
+        elif provider_type == "env":
+            # Get prefix from environment or settings
+            prefix = os.environ.get(
+                "MLPIE_SECRETS_ENV_PREFIX",
+                settings.secrets.ENV_PREFIX
+            )
+            config["env_prefix"] = prefix
+            
+        elif provider_type == "db":
+            # No additional config needed for db provider
+            pass
+            
+        # Get the list of available providers
+        try:
+            # Try to get the secret manager to get available providers
+            secret_manager = await setup_secret_manager()
+            available_providers = await secret_manager.get_available_providers()
+        except Exception as e:
+            logger.error(f"Error getting available providers: {str(e)}")
+            # Fallback to default list of providers
+            available_providers = ["file", "env", "db"]
+        
+        return {
+            "provider": provider_type,
+            "config": config,
+            "available_providers": available_providers
+        }
+    except Exception as e:
+        # Log the error but still return a valid response
+        logger.error(f"Error getting current secrets config: {str(e)}")
+        return {
+            "provider": "file",
+            "config": {"file_path": ""},
+            "available_providers": ["file", "env", "db"]
+        }
+
+
+# --- Root Settings Endpoint ---
+
+@router.get("/root", response_model=RootSettingsResponse, summary="Get Root Application Settings")
+async def get_root_config():
+    """Retrieve the non-sensitive root application settings."""
+    try:
+        config_manager = get_config_manager()
+        root_settings = config_manager.get_root_settings()
+        # Pydantic will automatically convert root_settings to RootSettingsResponse,
+        # excluding fields not defined in the response model.
+        return root_settings
+    except Exception as e:
+        logger.exception("Error retrieving root settings") # Log the full error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while retrieving root settings."
+        )
+
