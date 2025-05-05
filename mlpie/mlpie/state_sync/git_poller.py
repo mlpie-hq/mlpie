@@ -136,6 +136,9 @@ async def poll_git_repository():
                     # Perform pull operation and get results
                     was_pulled, current_sha, previous_sha, pull_details = await pull_repository_changes(settings, repo_path)
                     
+                    # Check if this is a fresh repository state
+                    is_first_run = repo_state.commit_sha is None
+                    
                     # Update database with results
                     await update_after_git_pull(
                         session=session,
@@ -150,7 +153,10 @@ async def poll_git_repository():
                         error_message=pull_details.get('error')
                     )
                     
-                    changes_detected = was_pulled
+                    # Force changes_detected to True if this is first run after DB reset
+                    changes_detected = was_pulled or is_first_run
+                    if is_first_run:
+                        logger.info("First run after database reset. Forcing full project scan.")
                 
                 # If changes were detected, trigger necessary actions
                 if changes_detected:
