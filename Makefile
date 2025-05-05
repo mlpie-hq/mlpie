@@ -114,6 +114,17 @@ db-upgrade:
 	@echo "Applying database migrations..."
 	@poetry run alembic upgrade head
 
+db-reset:
+	@echo "Resetting database..."
+	@rm -rf ./data/*.db
+	@mkdir -p ./data
+	# Clean up any existing migration versions
+	@rm -rf ./mlpie/migrations/versions/*
+	# Create a new migration and upgrade
+	@cd mlpie && poetry run alembic revision --autogenerate -m "Reset database schema"
+	@cd mlpie && poetry run alembic upgrade head
+	@echo "Database reset complete. New schema created."
+
 # Cleaning
 clean:
 	@echo "Cleaning up build artifacts and cache files..."

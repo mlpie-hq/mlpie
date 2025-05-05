@@ -11,23 +11,28 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 APSCHEDULER_AVAILABLE = False
 
+# Define placeholders first so imports don't fail
+class AsyncIOScheduler:
+    """Placeholder for AsyncIOScheduler when APScheduler is not available."""
+    def __init__(self, **kwargs):
+        self.running = False
+    def add_job(self, *args, **kwargs):
+        pass
+    def start(self):
+        pass
+    def shutdown(self):
+        pass
+
+# Try to import APScheduler with proper error handling
 try:
-    # Try to import APScheduler
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    # Import APScheduler components
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler as _RealAsyncIOScheduler
+    # Replace our placeholder with the real one
+    AsyncIOScheduler = _RealAsyncIOScheduler
     APSCHEDULER_AVAILABLE = True
+    logger.info("APScheduler successfully imported")
 except ImportError:
     logger.warning("APScheduler not available. Scheduler will be disabled.")
-    # Create a placeholder class to avoid TypeErrors
-    class AsyncIOScheduler:
-        """Placeholder for AsyncIOScheduler when APScheduler is not available."""
-        def __init__(self, **kwargs):
-            self.running = False
-        def add_job(self, *args, **kwargs):
-            pass
-        def start(self):
-            pass
-        def shutdown(self):
-            pass
 
 # Import other required modules
 from mlpie.config import RootSettings

@@ -298,7 +298,7 @@ async def get_current_secrets_config():
     """
     try:
         # Get provider type from env vars or settings
-        settings = get_settings()
+        settings = get_root_settings()
         
         # Get provider from environment variable or settings
         provider_type = os.environ.get(

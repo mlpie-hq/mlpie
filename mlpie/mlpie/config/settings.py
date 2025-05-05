@@ -25,17 +25,17 @@ class RootGitRepositorySettings(BaseSettings):
     )
     
     REPO_URL: str = Field(
-        default="https://github.com/mlpie/mlpie",
-        description="URL of the Git repository"
+        default=None,
+        description="URL of the Master Git repository"
     )
     
-    REPO_USERNAME: str = Field(
-        default="mlpie",
+    REPO_USERNAME: Optional[str] = Field(
+        default=None,
         description="Git username for operations"
     )
     
-    REPO_EMAIL: str = Field(
-        default="mlpie@example.com",
+    REPO_EMAIL: Optional[str] = Field(
+        default=None,
         description="Git email for operations"
     )
 
@@ -175,8 +175,8 @@ class RootSettings(BaseSettings):
 
     # Repository path
     REPOSITORY_PATH: str = Field(
-        default="./repository",
-        description="Path to the git repository that will be scanned"  
+        default=str("./generated/root_repository"),
+        description="Path to directory for storing repository clones"  
     )
 
     # Cronjob settings

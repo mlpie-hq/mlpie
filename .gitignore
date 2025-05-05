@@ -94,6 +94,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Any test generate images
+ui/*test*/**/*.png
+test*/**/*.png
+
 # Environments
 .env
 !.env.local

@@ -1,0 +1,38 @@
+apiVersion: mlpie.ai/v1
+kind: Project
+metadata:
+  name: sample-ml-project
+  description: "A sample machine learning project"
+  labels:
+    team: data-science
+    environment: dev
+spec:
+  repositoryUrl: "https://github.com/example/ml-model-repo.git"
+  branch: "main"
+  auth:
+    type: "ssh_key"
+    username: "git"
+    credentialId: "12345678-1234-5678-abcd-1234567890ab"
+  resources:
+    cpu: "2"
+    memory: "8Gi"
+    gpu: "1"
+  settings:
+    autoSync: true
+    syncInterval: "5m"
+  pipeline:
+    enabled: true
+    definition: "pipelines/training.yaml"
+  endpoints:
+    - name: "model-api"
+      port: 8080
+      path: "/api/v1"
+status:
+  phase: "Active"
+  lastSyncTime: "2023-06-01T10:15:30Z"
+  conditions:
+    - type: "Ready"
+      status: "True"
+      lastTransitionTime: "2023-06-01T10:15:30Z"
+      reason: "ProjectReady"
+      message: "Project is running normally" 

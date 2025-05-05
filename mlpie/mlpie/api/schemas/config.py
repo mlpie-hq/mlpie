@@ -39,8 +39,8 @@ class StatusResponse(BaseModel):
 class RootGitRepositorySettingsResponse(BaseModel):
     """Read-only Git repository settings (excluding secrets)."""
     REPO_URL: str
-    REPO_USERNAME: str
-    REPO_EMAIL: str
+    REPO_USERNAME: Optional[str] = None
+    REPO_EMAIL: Optional[str] = None
     AUTH_TYPE: str
     # Sensitive fields (TOKEN, PASSWORD, SSH_KEY) are excluded
 
