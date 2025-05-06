@@ -186,10 +186,17 @@ async def reconcile_datasets(
             # Update fields from new dataset
             existing_dataset.spec = dataset.spec
             existing_dataset.description = dataset.description
-            existing_dataset.location = dataset.location
             existing_dataset.format = dataset.format
+            existing_dataset.source_type = dataset.source_type
+            existing_dataset.host = dataset.host
+            existing_dataset.port = dataset.port
+            existing_dataset.database = dataset.database
             existing_dataset.active = dataset.active
             existing_dataset.project_id = dataset.project_id
+            existing_dataset.labels = dataset.labels
+            existing_dataset.credentials_secret_name = dataset.credentials_secret_name
+            existing_dataset.credentials_username_key = dataset.credentials_username_key
+            existing_dataset.credentials_password_key = dataset.credentials_password_key
             
             # Update in database
             await update_dataset(session, existing_dataset)

@@ -1,0 +1,27 @@
+apiVersion: mlpie.ai/v1
+kind: Dataset
+metadata:
+  name: "customer-demographics"
+  description: "Cleaned customer demographic data with 25+ attributes for personalization"
+  version: "v2.1.0"
+  labels:
+    - "customers"
+    - "demographics"
+    - "production"
+spec:
+  format: "PostgreSQL"
+  projectRef:
+    name: "sample-ml-project"
+  source:
+    type: "PostgreSQL"
+    connection:
+      host: "analytics-db.mlpie.ai"
+      port: 5432
+      database: "analytics"
+      credentialsFrom:
+        secretKeyRef:
+          name: "analytics-db-credentials" 
+          usernameKey: "username"          
+          passwordKey: "password"          
+  config:
+    sample_rate: 0.1 

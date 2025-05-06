@@ -33,7 +33,7 @@ from mlpie.db.crud.repository import (
     get_or_create_repository_state, update_after_git_pull, set_sync_status
 )
 from mlpie.db.models.repository import SyncStatus
-from mlpie.state_sync.entity_scanner import ProjectScanner, DatasetScanner
+from mlpie.state_sync.entity_scanner import ProjectScanner, DatasetScanner, PipelineScanner
 
 
 async def poll_git_repository():
@@ -358,6 +358,7 @@ async def process_repository_changes(repo_path, settings):
         # Create repository scanners
         project_scanner = ProjectScanner(repo_path)
         dataset_scanner = DatasetScanner(repo_path)
+        pipeline_scanner = PipelineScanner(repo_path)
         
         # Scan for entities in the repository
         async for session in get_session():
@@ -409,6 +410,21 @@ async def process_repository_changes(repo_path, settings):
                     # Reconcile datasets with database
                     result = await dataset_scanner.reconcile_entities(session, datasets)
                     logger.info(f"Dataset reconciliation: {result}")
+                
+                # Scan the repository for pipelines
+                pipelines = await pipeline_scanner.scan_repository(
+                    previous_sha=previous_sha,
+                    current_sha=current_sha
+                )
+                
+                if not pipelines:
+                    logger.info("No pipelines found in the repository.")
+                else:
+                    logger.info(f"Found {len(pipelines)} pipelines in the repository.")
+                    
+                    # Reconcile pipelines with database
+                    result = await pipeline_scanner.reconcile_entities(session, pipelines)
+                    logger.info(f"Pipeline reconciliation: {result}")
                 
                 logger.info("Repository changes processed successfully.")
                 break

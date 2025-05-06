@@ -67,6 +67,7 @@ class Project(Base):
     
     # Relationships
     datasets = relationship("Dataset", back_populates="project")
+    pipelines = relationship("Pipeline", back_populates="project")
     
     def __repr__(self):
         return f"<Project(name='{self.name}', repository_url='{self.repository_url}', status='{self.status}')>"
