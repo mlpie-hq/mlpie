@@ -33,7 +33,7 @@ from mlpie.db.crud.repository import (
     get_or_create_repository_state, update_after_git_pull, set_sync_status
 )
 from mlpie.db.models.repository import SyncStatus
-from mlpie.state_sync.entity_scanner import ProjectScanner, DatasetScanner, PipelineScanner
+from mlpie.state_sync.entity_scanner import ProjectScanner, DatasetScanner, PipelineScanner, EnvironmentScanner
 
 
 async def poll_git_repository():
@@ -359,6 +359,7 @@ async def process_repository_changes(repo_path, settings):
         project_scanner = ProjectScanner(repo_path)
         dataset_scanner = DatasetScanner(repo_path)
         pipeline_scanner = PipelineScanner(repo_path)
+        environment_scanner = EnvironmentScanner(repo_path)
         
         # Scan for entities in the repository
         async for session in get_session():
@@ -425,6 +426,21 @@ async def process_repository_changes(repo_path, settings):
                     # Reconcile pipelines with database
                     result = await pipeline_scanner.reconcile_entities(session, pipelines)
                     logger.info(f"Pipeline reconciliation: {result}")
+                
+                # Scan the repository for environments
+                environments = await environment_scanner.scan_repository(
+                    previous_sha=previous_sha,
+                    current_sha=current_sha
+                )
+                
+                if not environments:
+                    logger.info("No environments found in the repository.")
+                else:
+                    logger.info(f"Found {len(environments)} environments in the repository.")
+                    
+                    # Reconcile environments with database
+                    result = await environment_scanner.reconcile_entities(session, environments)
+                    logger.info(f"Environment reconciliation: {result}")
                 
                 logger.info("Repository changes processed successfully.")
                 break

@@ -550,4 +550,125 @@ class PipelineScanner(EntityScanner):
                 "created": 0,
                 "updated": 0,
                 "error": str(e)
+            }
+
+
+class EnvironmentScanner(EntityScanner):
+    """
+    Scanner for Environment definitions.
+    """
+    
+    entity_name = "environment"
+    file_patterns = ["**/environments/*.yaml", "**/environments/*.yml"]
+    
+    def __init__(self, repo_path: str):
+        from mlpie.db.models.environment import Environment
+        super().__init__(repo_path)
+        self.model_class = Environment
+    
+    def _validate_entity_type(self, kind: str, api_version: str) -> bool:
+        """
+        Check if this is an Environment definition.
+        
+        Args:
+            kind: Kind field from YAML
+            api_version: apiVersion field from YAML
+            
+        Returns:
+            True if this is an Environment, False otherwise
+        """
+        return kind == "Environment" and api_version.startswith("mlpie.ai/")
+    
+    def _parse_entity_file(self, file_path: str) -> Optional[T]:
+        """
+        Parse an environment definition file.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Environment instance or None if the file doesn't define a valid environment
+        """
+        try:
+            # Get relative path from repo root
+            rel_path = os.path.relpath(file_path, self.repo_path)
+            
+            # Load YAML file
+            with open(file_path, 'r') as f:
+                content = yaml.safe_load(f)
+                
+            # Validate basic structure
+            if not content:
+                logger.debug(f"Empty YAML file: {rel_path}")
+                return None
+                
+            if not isinstance(content, dict):
+                logger.warning(f"Invalid YAML structure in {rel_path}: not a dictionary")
+                return None
+                
+            # Check for expected K8s-like structure
+            kind = content.get('kind')
+            api_version = content.get('apiVersion')
+            
+            if not self._validate_entity_type(kind, api_version):
+                # Not our entity type or missing required fields
+                return None
+                
+            # Extract core fields from spec
+            metadata = content.get("metadata", {})
+            spec = content.get("spec", {})
+            
+            # Create environment instance with basic fields
+            from mlpie.db.models.environment import Environment
+            environment = Environment(
+                name=metadata.get("name"),
+                description=metadata.get("description"),
+                version=metadata.get("version"),
+                spec=content,
+                active=True,
+                labels=metadata.get("labels"),
+                status="Ready",
+                source_path=rel_path
+            )
+            
+            # Handle project reference
+            project_ref = spec.get("projectRef")
+            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+                # We'll need to resolve this project name to an ID when reconciling
+                # Store the project name in the spec for now
+                environment.project_id = None  # Will be resolved during reconciliation
+                
+            return environment
+                
+        except yaml.YAMLError as e:
+            logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
+            return None
+        except Exception as e:
+            logger.exception(f"Error processing entity file {file_path}", exc_info=e)
+            return None
+    
+    async def reconcile_entities(self, 
+                                session: AsyncSession, 
+                                entities: List[T]) -> Dict[str, int]:
+        """
+        Reconcile scanned environments with database state.
+        
+        Args:
+            session: Database session
+            entities: List of environments found by scanning
+            
+        Returns:
+            Dictionary with counts of created/updated/deleted environments
+        """
+        from mlpie.db.crud.environment import reconcile_environments
+        
+        try:
+            # Use the environment reconciliation function
+            return await reconcile_environments(session, entities)
+        except Exception as e:
+            logger.exception("Error reconciling environments", exc_info=e)
+            return {
+                "created": 0,
+                "updated": 0,
+                "error": str(e)
             } 

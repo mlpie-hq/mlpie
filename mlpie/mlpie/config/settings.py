@@ -181,7 +181,7 @@ class RootSettings(BaseSettings):
 
     # Cronjob settings
     REPO_SCAN_INTERVAL_SECONDS: int = Field(
-        default=30,
+        default=10,
         description="Interval in seconds for scanning the root repository.",
         ge=5 # Ensure interval is at least 5 seconds
     )

@@ -1,0 +1,56 @@
+apiVersion: mlpie.ai/v1
+kind: Environment
+metadata:
+  name: "staging"
+  description: "Staging environment for testing ML models and pipelines"
+  version: "v1.0.0"
+  labels:
+    - "staging"
+    - "test"
+spec:
+  projectRef:
+    name: "sample-ml-project"
+  orchestrators:
+    - type: "airflow"
+      config:
+        base_url: "https://airflow.staging.mlpie.ai"
+        auth:
+          secretRef:
+            name: "airflow-staging-credentials"
+            tokenKey: "token"
+  training_platforms:
+    - type: "sagemaker"
+      config:
+        aws_account_id: "987654321098"
+        region: "us-east-1"
+        auth:
+          secretRef:
+            name: "sagemaker-staging-credentials"
+            accessKeyIdKey: "aws_access_key_id"
+            secretAccessKeyKey: "aws_secret_access_key"
+    - type: "k8s"
+      config:
+        cluster_name: "staging-eks"
+        namespace: "mlpie-staging"
+        auth:
+          secretRef:
+            name: "eks-staging-kubeconfig"
+            kubeconfigKey: "kubeconfig"
+  feature_stores:
+    - type: "feast"
+      config:
+        base_url: "https://feast.staging.mlpie.ai"
+        registry_path: "s3://mlpie-registry/staging"
+        auth:
+          secretRef:
+            name: "feast-staging-credentials"
+            accessKeyIdKey: "aws_access_key_id"
+            secretAccessKeyKey: "aws_secret_access_key"
+  monitoring:
+    - type: "prometheus"
+      config:
+        base_url: "https://prometheus.staging.mlpie.ai"
+        auth:
+          secretRef:
+            name: "prometheus-staging-credentials"
+            tokenKey: "token" 

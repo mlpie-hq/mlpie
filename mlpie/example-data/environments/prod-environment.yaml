@@ -1,0 +1,72 @@
+apiVersion: mlpie.ai/v1
+kind: Environment
+metadata:
+  name: "production"
+  description: "Production environment for ML models and pipelines"
+  version: "v1.0.0"
+  labels:
+    - "prod"
+    - "critical"
+spec:
+  projectRef:
+    name: "sample-ml-project"
+  orchestrators:
+    - type: "airflow"
+      config:
+        base_url: "https://airflow.prod.mlpie.ai"
+        auth:
+          secretRef:
+            name: "airflow-prod-credentials"
+            tokenKey: "token"
+    - type: "dagster"
+      config:
+        base_url: "https://dagster.prod.mlpie.ai"
+        auth:
+          secretRef:
+            name: "dagster-prod-credentials"
+            usernameKey: "username"
+            passwordKey: "password"
+  training_platforms:
+    - type: "sagemaker"
+      config:
+        aws_account_id: "123456789012"
+        region: "us-east-1"
+        auth:
+          secretRef:
+            name: "sagemaker-prod-credentials"
+            accessKeyIdKey: "aws_access_key_id"
+            secretAccessKeyKey: "aws_secret_access_key"
+    - type: "k8s"
+      config:
+        cluster_name: "prod-eks"
+        namespace: "mlpie-prod"
+        auth:
+          secretRef:
+            name: "eks-kubeconfig"
+            kubeconfigKey: "kubeconfig"
+  feature_stores:
+    - type: "feast"
+      config:
+        base_url: "https://feast.prod.mlpie.ai"
+        registry_path: "s3://mlpie-registry/prod"
+        auth:
+          secretRef:
+            name: "feast-prod-credentials"
+            accessKeyIdKey: "aws_access_key_id"
+            secretAccessKeyKey: "aws_secret_access_key"
+  monitoring:
+    - type: "prometheus"
+      config:
+        base_url: "https://prometheus.prod.mlpie.ai"
+        auth:
+          secretRef:
+            name: "prometheus-prod-credentials"
+            tokenKey: "token"
+    - type: "grafana"
+      config:
+        base_url: "https://grafana.prod.mlpie.ai"
+        auth:
+          secretRef:
+            name: "grafana-prod-credentials"
+            usernameKey: "username"
+            passwordKey: "password" 
