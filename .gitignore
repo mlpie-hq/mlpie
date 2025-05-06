@@ -140,3 +140,11 @@ cython_debug/
 *.swp
 *.swo
 *~ 
+
+
+# Ignore all files in the data directory
+data/*
+
+# Ignore all files in the migrations directory
+mlpie/migrations
+.env.local

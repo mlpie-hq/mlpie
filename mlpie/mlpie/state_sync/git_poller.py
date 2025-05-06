@@ -33,7 +33,7 @@ from mlpie.db.crud.repository import (
     get_or_create_repository_state, update_after_git_pull, set_sync_status
 )
 from mlpie.db.models.repository import SyncStatus
-from mlpie.state_sync.entity_scanner import ProjectScanner
+from mlpie.state_sync.entity_scanner import ProjectScanner, DatasetScanner
 
 
 async def poll_git_repository():
@@ -355,10 +355,11 @@ async def process_repository_changes(repo_path, settings):
     try:
         logger.info("Processing repository changes...")
         
-        # Create a repository scanner
+        # Create repository scanners
         project_scanner = ProjectScanner(repo_path)
+        dataset_scanner = DatasetScanner(repo_path)
         
-        # Scan for projects in the repository
+        # Scan for entities in the repository
         async for session in get_session():
             try:
                 # Get repository state to access SHAs
@@ -369,7 +370,7 @@ async def process_repository_changes(repo_path, settings):
                     repository_path=repo_path
                 )
                 
-                # Scan for projects using git diff if we have previous state
+                # Scan for entities using git diff if we have previous state
                 previous_sha = None
                 current_sha = None
                 
@@ -379,7 +380,7 @@ async def process_repository_changes(repo_path, settings):
                     repo = Repo(repo_path)
                     current_sha = repo.head.commit.hexsha
                     
-                # Scan the repository
+                # Scan the repository for projects
                 projects = await project_scanner.scan_repository(
                     previous_sha=previous_sha,
                     current_sha=current_sha
@@ -394,10 +395,25 @@ async def process_repository_changes(repo_path, settings):
                     result = await project_scanner.reconcile_entities(session, projects)
                     logger.info(f"Project reconciliation: {result}")
                 
+                # Scan the repository for datasets
+                datasets = await dataset_scanner.scan_repository(
+                    previous_sha=previous_sha,
+                    current_sha=current_sha
+                )
+                
+                if not datasets:
+                    logger.info("No datasets found in the repository.")
+                else:
+                    logger.info(f"Found {len(datasets)} datasets in the repository.")
+                    
+                    # Reconcile datasets with database
+                    result = await dataset_scanner.reconcile_entities(session, datasets)
+                    logger.info(f"Dataset reconciliation: {result}")
+                
                 logger.info("Repository changes processed successfully.")
                 break
             except Exception as e:
-                logger.exception("Error during project reconciliation", exc_info=e)
+                logger.exception("Error during entity reconciliation", exc_info=e)
         
     except Exception as e:
         logger.exception("Error processing repository changes", exc_info=e) 

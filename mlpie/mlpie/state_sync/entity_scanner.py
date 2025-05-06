@@ -286,4 +286,146 @@ class ProjectScanner(EntityScanner):
                 "created": 0,
                 "updated": 0,
                 "error": str(e)
+            }
+
+
+class DatasetScanner(EntityScanner):
+    """
+    Scanner for Dataset definitions.
+    """
+    
+    entity_name = "dataset"
+    file_patterns = ["**/datasets/*.yaml", "**/datasets/*.yml"]
+    
+    def __init__(self, repo_path: str):
+        from mlpie.db.models.dataset import Dataset
+        super().__init__(repo_path)
+        self.model_class = Dataset
+    
+    def _validate_entity_type(self, kind: str, api_version: str) -> bool:
+        """
+        Check if this is a Dataset definition.
+        
+        Args:
+            kind: Kind field from YAML
+            api_version: apiVersion field from YAML
+            
+        Returns:
+            True if this is a Dataset, False otherwise
+        """
+        return kind == "Dataset" and api_version.startswith("mlpie.ai/")
+    
+    def _parse_entity_file(self, file_path: str) -> Optional[T]:
+        """
+        Parse a dataset definition file.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Dataset instance or None if the file doesn't define a valid dataset
+        """
+        try:
+            # Get relative path from repo root
+            rel_path = os.path.relpath(file_path, self.repo_path)
+            
+            # Load YAML file
+            with open(file_path, 'r') as f:
+                content = yaml.safe_load(f)
+                
+            # Validate basic structure
+            if not content:
+                logger.debug(f"Empty YAML file: {rel_path}")
+                return None
+                
+            if not isinstance(content, dict):
+                logger.warning(f"Invalid YAML structure in {rel_path}: not a dictionary")
+                return None
+                
+            # Check for expected K8s-like structure
+            kind = content.get('kind')
+            api_version = content.get('apiVersion')
+            
+            if not self._validate_entity_type(kind, api_version):
+                # Not our entity type or missing required fields
+                return None
+                
+            # Extract core fields from spec
+            metadata = content.get("metadata", {})
+            spec = content.get("spec", {})
+            
+            # Create dataset instance with basic fields
+            from mlpie.db.models.dataset import Dataset
+            dataset = Dataset(
+                name=metadata.get("name"),
+                description=metadata.get("description"),
+                version=metadata.get("version"),
+                format=spec.get("format", ""),
+                spec=content,
+                active=True,
+                labels=metadata.get("labels"),
+                status="Ready"
+            )
+            
+            # Extract source information
+            source = spec.get("source", {})
+            if source:
+                dataset.source_type = source.get("type")
+                
+                # Get connection details
+                connection = source.get("connection", {})
+                if connection:
+                    dataset.host = connection.get("host")
+                    dataset.port = connection.get("port")
+                    dataset.database = connection.get("database")
+                    
+                    # Get K8s-style secret references
+                    credentials_from = connection.get("credentialsFrom", {})
+                    if credentials_from:
+                        secret_key_ref = credentials_from.get("secretKeyRef", {})
+                        if secret_key_ref:
+                            dataset.credentials_secret_name = secret_key_ref.get("name")
+                            dataset.credentials_username_key = secret_key_ref.get("usernameKey")
+                            dataset.credentials_password_key = secret_key_ref.get("passwordKey")
+            
+            # Handle project reference
+            project_ref = spec.get("projectRef")
+            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+                # We'll need to resolve this project name to an ID when reconciling
+                # Store the project name in the spec for now
+                dataset.project_id = None  # Will be resolved during reconciliation
+            
+            return dataset
+                
+        except yaml.YAMLError as e:
+            logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
+            return None
+        except Exception as e:
+            logger.exception(f"Error processing entity file {file_path}", exc_info=e)
+            return None
+    
+    async def reconcile_entities(self, 
+                                session: AsyncSession, 
+                                entities: List[T]) -> Dict[str, int]:
+        """
+        Reconcile scanned datasets with database state.
+        
+        Args:
+            session: Database session
+            entities: List of datasets found by scanning
+            
+        Returns:
+            Dictionary with counts of created/updated/deleted datasets
+        """
+        from mlpie.db.crud.dataset import reconcile_datasets
+        
+        try:
+            # Use the dataset reconciliation function
+            return await reconcile_datasets(session, entities)
+        except Exception as e:
+            logger.exception("Error reconciling datasets", exc_info=e)
+            return {
+                "created": 0,
+                "updated": 0,
+                "error": str(e)
             } 

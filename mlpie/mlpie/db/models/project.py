@@ -10,6 +10,7 @@ import enum
 
 from sqlalchemy import Column, String, Text, DateTime, Enum, JSON
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from mlpie.db.base import Base
 
@@ -63,6 +64,9 @@ class Project(Base):
     
     # File tracking
     source_path = Column(String(255), nullable=True)  # Path to the source YAML file
+    
+    # Relationships
+    datasets = relationship("Dataset", back_populates="project")
     
     def __repr__(self):
         return f"<Project(name='{self.name}', repository_url='{self.repository_url}', status='{self.status}')>"
