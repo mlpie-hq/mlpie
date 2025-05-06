@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil, Trash2, Edit, GitBranch, RefreshCw, X, MoreVertical } from 'lucide-react';
+import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil, Trash2, Edit, GitBranch, RefreshCw, X, MoreVertical, KeyRound, Eye, EyeOff, Plus } from 'lucide-react';
 import MultiMethodInterface, { UIFormField, CodeExample, FormData } from '@/components/MultiMethodInterface';
 
 // Define GitRepository Type with name
@@ -34,6 +34,19 @@ type ProjectDataset = {
   lastUpdated: string;
 };
 
+// Define Secret Type
+type SecretKeyValue = {
+  key: string;
+  value: string;
+};
+
+type Secret = {
+  id: string;
+  name: string;
+  values: SecretKeyValue[];
+  createdAt: string;
+};
+
 type Project = {
   id: number;
   name: string;
@@ -45,6 +58,7 @@ type Project = {
   datasets: ProjectDataset[];
   environments: Environment[];
   gitRepos: GitRepository[]; // Add Git Repos array
+  secrets: Secret[]; // Add Secrets array
 };
 
 // Temporary: Import or copy the initialProjects data structure for lookup
@@ -70,6 +84,28 @@ const initialProjects: Project[] = [
     gitRepos: [
       { id: 'repo-1', name: 'Main Churn Logic', url: 'https://github.com/mlpie-oss/churn-prediction', branch: 'main', lastSync: '5 mins ago', status: 'Synced' },
       { id: 'repo-2', name: 'Data Pipelines', url: 'https://dev.azure.com/org/project/_git/customer-data-pipelines', branch: 'develop', lastSync: '2 hours ago', status: 'Pending' },
+    ],
+    secrets: [
+      { 
+        id: 'secret-1', 
+        name: 'AWS Credentials', 
+        values: [
+          { key: 'AWS_ACCESS_KEY_ID', value: 'AKIAIOSFODNN7EXAMPLE' },
+          { key: 'AWS_SECRET_ACCESS_KEY', value: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY' }
+        ],
+        createdAt: '3 days ago'
+      },
+      {
+        id: 'secret-2',
+        name: 'Database Credentials',
+        values: [
+          { key: 'DB_HOST', value: 'postgres.example.com' },
+          { key: 'DB_USER', value: 'admin' },
+          { key: 'DB_PASSWORD', value: 'securepassword123' },
+          { key: 'DB_NAME', value: 'churn_prediction' }
+        ],
+        createdAt: '1 week ago'
+      }
     ]
   },
   {
@@ -90,7 +126,8 @@ const initialProjects: Project[] = [
       { id: 'dev', name: 'Development', status: 'Synced', deployedVersion: 'v0.8.0', cluster: 'dev-cluster', lastDeployed: '30 mins ago' },
       { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v0.7.5', cluster: 'prod-genai', lastDeployed: '3 days ago' },
     ],
-    gitRepos: []
+    gitRepos: [],
+    secrets: []
   },
   {
     id: 3,
@@ -108,7 +145,8 @@ const initialProjects: Project[] = [
     environments: [],
     gitRepos: [
        { id: 'repo-3', name: 'Classifier Model', url: 'https://gitlab.com/my-research-group/image-classifier', branch: 'feature/new-augmentation', lastSync: '1 day ago', status: 'Error' },
-    ]
+    ],
+    secrets: []
   },
    {
     id: 4,
@@ -125,7 +163,8 @@ const initialProjects: Project[] = [
     environments: [
        { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v2.0.0', cluster: 'prod-cluster-2', lastDeployed: '1 week ago' },
     ],
-    gitRepos: []
+    gitRepos: [],
+    secrets: []
   },
 ];
 
@@ -183,11 +222,20 @@ export default function ProjectDetailPage() {
   const [repoNameMMI, setRepoNameMMI] = useState('');
   const [repoUrlMMI, setRepoUrlMMI] = useState('');
 
+  // --- State for Secrets ---
+  const [secrets, setSecrets] = useState<Secret[]>([]);
+  const [isSecretModalOpen, setIsSecretModalOpen] = useState(false);
+  const [currentSecret, setCurrentSecret] = useState<Secret | null>(null);
+  const [secretName, setSecretName] = useState('');
+  const [secretValues, setSecretValues] = useState<SecretKeyValue[]>([{ key: '', value: '' }]);
+  const [showSecretValues, setShowSecretValues] = useState<Record<string, boolean>>({});
+
   // Effect to initialize states
   useEffect(() => {
     if (initialProjectData) {
       setEnvironments(initialProjectData.environments);
       setGitRepos(initialProjectData.gitRepos);
+      setSecrets(initialProjectData.secrets || []);
     }
   }, [initialProjectData]);
 
@@ -313,6 +361,91 @@ export default function ProjectDetailPage() {
   };
   // --- End Git Repo Handlers ---
 
+  // --- Handlers for Secret CRUD ---
+  const handleOpenSecretModal = (secret: Secret | null = null) => {
+    setCurrentSecret(secret);
+    if (secret) {
+      setSecretName(secret.name);
+      setSecretValues([...secret.values]);
+    } else {
+      setSecretName('');
+      setSecretValues([{ key: '', value: '' }]);
+    }
+    setIsSecretModalOpen(true);
+  };
+
+  const handleCloseSecretModal = () => {
+    setIsSecretModalOpen(false);
+    setCurrentSecret(null);
+    setSecretName('');
+    setSecretValues([{ key: '', value: '' }]);
+  };
+
+  const handleAddSecretKeyValue = () => {
+    setSecretValues([...secretValues, { key: '', value: '' }]);
+  };
+
+  const handleRemoveSecretKeyValue = (index: number) => {
+    const newValues = [...secretValues];
+    newValues.splice(index, 1);
+    setSecretValues(newValues);
+  };
+
+  const handleUpdateSecretKeyValue = (index: number, field: 'key' | 'value', newValue: string) => {
+    const newValues = [...secretValues];
+    newValues[index][field] = newValue;
+    setSecretValues(newValues);
+  };
+
+  const handleSaveSecret = () => {
+    if (!secretName) {
+      alert("Secret name is required.");
+      return;
+    }
+
+    // Validate that all keys and values are filled
+    const hasEmptyFields = secretValues.some(kv => !kv.key || !kv.value);
+    if (hasEmptyFields) {
+      alert("All key-value pairs must have both key and value filled.");
+      return;
+    }
+
+    // Check for duplicate keys
+    const keys = secretValues.map(kv => kv.key);
+    if (new Set(keys).size !== keys.length) {
+      alert("Secret keys must be unique.");
+      return;
+    }
+
+    const newSecretData: Secret = {
+      id: currentSecret ? currentSecret.id : `secret-${Date.now()}`,
+      name: secretName,
+      values: secretValues,
+      createdAt: currentSecret ? currentSecret.createdAt : new Date().toLocaleDateString()
+    };
+
+    if (currentSecret) {
+      setSecrets(prev => prev.map(s => s.id === currentSecret.id ? newSecretData : s));
+    } else {
+      setSecrets(prev => [...prev, newSecretData]);
+    }
+
+    handleCloseSecretModal();
+  };
+
+  const handleDeleteSecret = (idToDelete: string) => {
+    if (confirm("Are you sure you want to delete this secret? This action cannot be undone.")) {
+      setSecrets(prev => prev.filter(s => s.id !== idToDelete));
+    }
+  };
+
+  const toggleSecretValueVisibility = (secretId: string) => {
+    setShowSecretValues(prev => ({
+      ...prev,
+      [secretId]: !prev[secretId]
+    }));
+  };
+
   const project = initialProjectData;
 
   if (!project) {
@@ -333,6 +466,7 @@ export default function ProjectDetailPage() {
     { id: 'datasets', label: 'Datasets', icon: FlaskConical },
     { id: 'environments', label: 'Environments', icon: Server },
     { id: 'git', label: 'Git Repos', icon: GitBranch },
+    { id: 'secrets', label: 'Secrets', icon: KeyRound },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -1038,6 +1172,97 @@ export default function ProjectDetailPage() {
              )}
           </div>
         );
+      case 'secrets':
+        return (
+          <div className="space-y-6">
+             <div className="flex justify-between items-center">
+               <h2 className="text-xl font-medium text-foreground">Project Secrets</h2>
+               <button 
+                 onClick={() => handleOpenSecretModal()} 
+                 className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 flex items-center"
+               >
+                 <PlusCircle className="w-4 h-4 mr-2" />
+                 Add Secret
+               </button>
+             </div>
+
+             {secrets.length > 0 ? (
+              <div className="bg-card border border-border rounded-lg"> 
+                 <table className="w-full text-sm"> 
+                   <thead className="bg-secondary/50">
+                     <tr>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Name</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Key-Value Pairs</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Created At</th>
+                       <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {secrets.map((secret: Secret, index: number) => (
+                       <tr key={secret.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
+                         <td className="px-4 py-3 align-top font-medium text-foreground">{secret.name}</td> 
+                         <td className="px-4 py-3 align-top">
+                           <div className="flex items-center mb-1">
+                             <span className="text-xs text-muted-foreground mr-2">{secret.values.length} key-value pairs</span>
+                             <button 
+                               onClick={() => toggleSecretValueVisibility(secret.id)}
+                               className="p-1 text-xs text-muted-foreground hover:text-primary rounded"
+                             >
+                               {showSecretValues[secret.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                             </button>
+                           </div>
+                           <div className="space-y-1 max-w-xs">
+                             {secret.values.map((kv, kvIndex) => (
+                               <div key={kvIndex} className="flex items-center">
+                                 <span className="text-xs font-medium text-foreground mr-1">{kv.key}:</span>
+                                 <span className="text-xs text-muted-foreground font-mono">
+                                   {showSecretValues[secret.id] ? kv.value : '••••••••'}
+                                 </span>
+                               </div>
+                             ))}
+                           </div>
+                         </td>
+                         <td className="px-4 py-3 text-muted-foreground text-xs align-top">{secret.createdAt}</td> 
+                         
+                         <td className="px-4 py-3 text-right align-top whitespace-nowrap"> 
+                           <div className="flex space-x-1 justify-end">
+                             <button 
+                               onClick={() => handleOpenSecretModal(secret)}
+                               className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded"
+                               title="Edit Secret"
+                             >
+                               <Edit className="w-4 h-4" />
+                             </button>
+                             <button 
+                               onClick={() => handleDeleteSecret(secret.id)}
+                               className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+                               title="Delete Secret"
+                             >
+                               <Trash2 className="w-4 h-4" />
+                             </button>
+                           </div>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             ) : (
+               <div className="bg-card p-6 rounded-lg border border-border text-center">
+                   <KeyRound className="mx-auto h-12 w-12 text-muted-foreground"/>
+                   <h3 className="mt-2 text-sm font-semibold text-foreground">No secrets configured for this project yet.</h3>
+                   <div className="mt-6">
+                     <button 
+                       onClick={() => handleOpenSecretModal()}
+                       type="button" className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                       <PlusCircle className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
+                       Add Secret
+                     </button>
+                   </div>
+               </div>
+             )}
+          </div>
+        );
       case 'settings':
         return <div>Project Settings Placeholder</div>;
       default:
@@ -1279,6 +1504,115 @@ print(f"Linked repository: {repo.name} ({repo.id})")`;
                     sdkInstructions="Use the Python SDK to programmatically link a repository."
                   />
               </div>
+          </div>
+        </div>
+      )}
+
+      {isSecretModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 backdrop-blur-sm">
+          <div className="bg-background w-full max-w-2xl rounded-lg shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
+             <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
+               <h3 className="text-lg font-semibold text-foreground">
+                 {currentSecret ? 'Edit Secret' : 'Add New Secret'}
+               </h3>
+               <button 
+                 className="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"
+                 onClick={handleCloseSecretModal}
+                 title="Close"
+                 aria-label="Close dialog"
+               >
+                 <X className="w-5 h-5" />
+               </button>
+             </div>
+             <div className="p-6 overflow-y-auto flex-1">
+               <form onSubmit={(e) => { e.preventDefault(); handleSaveSecret(); }}>
+                 <div className="space-y-5">
+                   <div>
+                     <label htmlFor="secret-name" className="block text-sm font-medium text-foreground mb-1">
+                       Secret Name
+                     </label>
+                     <input
+                       type="text"
+                       id="secret-name"
+                       value={secretName}
+                       onChange={(e) => setSecretName(e.target.value)}
+                       className="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                       placeholder="e.g., AWS Credentials, Database Connection"
+                       required
+                     />
+                   </div>
+                   
+                   <div>
+                     <div className="flex justify-between items-center mb-2">
+                       <label className="block text-sm font-medium text-foreground">
+                         Secret Values
+                       </label>
+                       <button
+                         type="button"
+                         onClick={handleAddSecretKeyValue}
+                         className="inline-flex items-center text-xs text-primary hover:text-primary/80"
+                       >
+                         <Plus className="w-3 h-3 mr-1" />
+                         Add Key-Value Pair
+                       </button>
+                     </div>
+                     
+                     <div className="space-y-3">
+                       {secretValues.map((kv, index) => (
+                         <div key={index} className="flex items-start gap-2">
+                           <div className="flex-1">
+                             <input
+                               type="text"
+                               value={kv.key}
+                               onChange={(e) => handleUpdateSecretKeyValue(index, 'key', e.target.value)}
+                               className="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                               placeholder="Key"
+                               required
+                             />
+                           </div>
+                           <div className="flex-1">
+                             <input
+                               type="password"
+                               value={kv.value}
+                               onChange={(e) => handleUpdateSecretKeyValue(index, 'value', e.target.value)}
+                               className="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                               placeholder="Value"
+                               required
+                             />
+                           </div>
+                           {secretValues.length > 1 && (
+                             <button
+                               type="button"
+                               onClick={() => handleRemoveSecretKeyValue(index)}
+                               className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+                               title="Remove key-value pair"
+                             >
+                               <X className="w-4 h-4" />
+                             </button>
+                           )}
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 </div>
+                 
+                 <div className="mt-6 flex justify-end space-x-3">
+                   <button
+                     type="button"
+                     onClick={handleCloseSecretModal}
+                     className="px-4 py-2 border border-border text-muted-foreground rounded-md text-sm hover:bg-secondary"
+                   >
+                     Cancel
+                   </button>
+                   <button
+                     type="submit"
+                     className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90"
+                   >
+                     {currentSecret ? 'Update Secret' : 'Create Secret'}
+                   </button>
+                 </div>
+               </form>
+             </div>
           </div>
         </div>
       )}
