@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil, Trash2, Edit, GitBranch, RefreshCw, X, MoreVertical, KeyRound, Eye, EyeOff, Plus } from 'lucide-react';
 import MultiMethodInterface, { UIFormField, CodeExample, FormData } from '@/components/MultiMethodInterface';
+import { useProject } from '@/contexts/ProjectContext';
 
 // Define GitRepository Type with name
 type GitRepository = {
@@ -202,6 +203,7 @@ export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id ? parseInt(params.id as string, 10) : null;
   
+  const { setSelectedProject, setSelectedEnvironment } = useProject();
   const [activeTab, setActiveTab] = useState('overview');
   const initialProjectData = initialProjects.find(p => p.id === projectId);
   
@@ -236,8 +238,18 @@ export default function ProjectDetailPage() {
       setEnvironments(initialProjectData.environments);
       setGitRepos(initialProjectData.gitRepos);
       setSecrets(initialProjectData.secrets || []);
+      
+      // Update the global context with this project
+      setSelectedProject(initialProjectData);
+      
+      // If there are environments, select the first one by default
+      if (initialProjectData.environments.length > 0) {
+        setSelectedEnvironment(initialProjectData.environments[0]);
+      } else {
+        setSelectedEnvironment(null);
+      }
     }
-  }, [initialProjectData]);
+  }, [initialProjectData, setSelectedProject, setSelectedEnvironment]);
 
   // Effect for closing context menu on outside click
   useEffect(() => {

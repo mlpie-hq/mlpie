@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Bell, GitPullRequest } from 'lucide-react';
+import ProjectSelector from './ProjectSelector';
 
 interface SyncStatus {
   needs_sync: boolean;
@@ -51,7 +52,7 @@ export default function Header() {
     <header className="sticky top-0 z-10 w-full bg-card border-b border-border">
       <div className="px-6 h-16 flex items-center justify-between">
         <div className="flex items-center">
-          <h1 className="text-xl font-semibold text-foreground hidden md:block">Platform</h1>
+          <ProjectSelector />
         </div>
         
         <div className="flex items-center space-x-3">
