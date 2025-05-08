@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bell, GitPullRequest } from 'lucide-react';
+import { GitPullRequest } from 'lucide-react';
 import ProjectSelector from './ProjectSelector';
+import { JobsProgress } from './JobsProgress';
 
 interface SyncStatus {
   needs_sync: boolean;
@@ -94,13 +95,8 @@ export default function Header() {
             </div>
           </div>
 
-          {/* Notifications */}
-          <button
-            className="flex items-center justify-center p-2 rounded-md text-muted hover:bg-secondary hover:text-foreground"
-            aria-label="View notifications"
-          >
-            <Bell size={18} />
-          </button>
+          {/* Jobs Progress Indicator */}
+          <JobsProgress />
 
           {/* User profile */}
           <div className="h-8 w-8 bg-secondary rounded-full flex items-center justify-center text-xs font-medium text-secondary-foreground">

@@ -28,6 +28,11 @@ jsonschema = "^4.22.0" # For validating plugin configurations
 aiosqlite = "^0.20.0"
 apscheduler = "~3.11" # Using stable v3
 greenlet = "^3.0.3" # Potentially needed for SQLAlchemy async/sync context
+# Data processing and profiling dependencies
+pandas = "^2.2.1"
+numpy = "^1.26.4"
+# Optional: PySpark for large data profiling
+# pyspark = "^3.5.1"
 
 
 [tool.poetry.group.dev.dependencies]

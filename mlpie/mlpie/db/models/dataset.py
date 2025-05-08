@@ -48,6 +48,13 @@ class Dataset(Base):
     last_synced_at = Column(DateTime, nullable=True)  # When was data last synced
     last_updated_at = Column(DateTime, nullable=True)  # When was data last updated
     
+    # Profiling configuration
+    profiler_name = Column(String(100), nullable=True)  # Name of the profiler to use
+    auto_profile = Column(Boolean, default=False)  # Whether to automatically profile the dataset
+    last_profiled_at = Column(DateTime, nullable=True)  # When the dataset was last profiled
+    profile_results = Column(JSON, nullable=True)  # Latest profile results
+    profile_config = Column(JSON, nullable=True, default={})  # Configuration for the profiler
+    
     # Tags and categorization
     _labels = Column("labels", JSON, nullable=True, default=list)  # JSON array of labels/tags
     
@@ -57,6 +64,9 @@ class Dataset(Base):
     # Project relationship (optional)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
     project = relationship("Project", back_populates="datasets")
+    
+    # Jobs relationship
+    jobs = relationship("Job", back_populates="dataset")
     
     # Timestamps
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
@@ -126,5 +136,15 @@ class Dataset(Base):
             
         if "project_id" in data:
             dataset.project_id = data["project_id"]
+        
+        # Add profiling options if present
+        if "profiler_name" in data:
+            dataset.profiler_name = data["profiler_name"]
+            
+        if "auto_profile" in data:
+            dataset.auto_profile = data["auto_profile"]
+            
+        if "profile_config" in data:
+            dataset.profile_config = data["profile_config"]
             
         return dataset 

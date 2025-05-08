@@ -9,6 +9,7 @@ from mlpie.utils.logger import logger
 from mlpie.db.connection import setup_database
 from mlpie.config.settings import RootSettings
 from mlpie.state_sync.scheduler import initialize_scheduler
+from mlpie.plugins import discover_plugins_from_entry_points, discover_module_providers
 
 
 async def bootstrap_application(settings: RootSettings):
@@ -34,6 +35,19 @@ async def bootstrap_application(settings: RootSettings):
         # Initialize scheduler
         logger.info("Initializing background scheduler...")
         await initialize_scheduler(settings)
+        
+        # Discover and register plugins
+        logger.info("Discovering plugins...")
+        
+        # First, try to discover external plugins from entry points
+        external_plugins = discover_plugins_from_entry_points()
+        logger.info(f"Discovered {len(external_plugins)} external plugins")
+        
+        # Next, discover built-in plugins from modules
+        built_in_plugins = discover_module_providers([
+            "mlpie.profilers"  # Include profiler plugins
+        ])
+        logger.info(f"Discovered {len(built_in_plugins)} built-in plugins")
         
         # Add other initialization steps here as needed
         

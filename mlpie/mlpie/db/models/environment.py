@@ -5,7 +5,7 @@ This module defines SQLAlchemy models for storing environment information in the
 """
 
 from datetime import datetime, UTC
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from uuid import uuid4
 
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, JSON
@@ -13,6 +13,12 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from mlpie.db.base import Base
+from mlpie.profilers.config import (
+    ProfilerConfig,
+    get_profiler_config_from_environment,
+    get_available_profilers_from_environment,
+    get_default_profiler_from_environment
+)
 
 
 class Environment(Base):
@@ -31,6 +37,9 @@ class Environment(Base):
     # Project relationship (optional)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
     project = relationship("Project", back_populates="environments")
+    
+    # Jobs relationship
+    jobs = relationship("Job", back_populates="environment")
 
     # Tags and categorization
     _labels = Column("labels", JSON, nullable=True, default=list)  # JSON array of labels/tags
@@ -56,6 +65,36 @@ class Environment(Base):
 
     def __repr__(self):
         return f"<Environment(name='{self.name}', status='{self.status}')>"
+
+    def get_profiler_config(self, profiler_name: Optional[str] = None) -> Optional[ProfilerConfig]:
+        """
+        Get configuration for a specific profiler or the default profiler.
+        
+        Args:
+            profiler_name: Name of the profiler to get, or None for default
+            
+        Returns:
+            ProfilerConfig if found, None otherwise
+        """
+        return get_profiler_config_from_environment(self.spec, profiler_name)
+    
+    def get_available_profilers(self) -> List[str]:
+        """
+        Get list of available profiler names configured for this environment.
+        
+        Returns:
+            List of profiler names
+        """
+        return get_available_profilers_from_environment(self.spec)
+    
+    def get_default_profiler(self) -> Optional[str]:
+        """
+        Get the default profiler name for this environment.
+        
+        Returns:
+            Default profiler name or None if not specified
+        """
+        return get_default_profiler_from_environment(self.spec)
 
     @classmethod
     def from_yaml_spec(cls, spec_dict, source_path=None):

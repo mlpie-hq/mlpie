@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "../app/globals.css";
-import Header from "@/components/Header"; // Add Header import
-import Sidebar from "@/components/Sidebar"; // Adjust path if necessary
-import Providers from "@/components/Providers"; // Import the new provider
+import Header from "@/components/Header";
+import Sidebar from "@/components/Sidebar";
+import Providers from "@/components/Providers";
 import Breadcrumb from "@/components/Breadcrumb";
+import { Toaster } from "sonner"
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -24,6 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={inter.variable}>
+      <head />
       <body className="bg-background text-foreground antialiased">
         <Providers>
           <div className="flex h-screen overflow-hidden">
@@ -45,6 +47,7 @@ export default function RootLayout({
             </div>
           </div>
         </Providers>
+        <Toaster />
       </body>
     </html>
   );

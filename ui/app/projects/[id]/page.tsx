@@ -3,9 +3,10 @@
 import { useParams } from 'next/navigation';
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Play, Pencil, Trash2, Edit, GitBranch, RefreshCw, X, MoreVertical, KeyRound, Eye, EyeOff, Plus } from 'lucide-react';
+import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Trash2, Edit, GitBranch, RefreshCw, X, MoreVertical, KeyRound, Eye, EyeOff, Plus } from 'lucide-react';
 import MultiMethodInterface, { UIFormField, CodeExample, FormData } from '@/components/MultiMethodInterface';
 import { useProject } from '@/contexts/ProjectContext';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Define GitRepository Type with name
 type GitRepository = {
@@ -1042,7 +1043,11 @@ export default function ProjectDetailPage() {
                   {environments.length > 0 ? (
                     environments.map((env: Environment, index: number) => (
                       <tr key={env.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
-                        <td className="px-4 py-3 font-medium text-foreground">{env.name}</td>
+                        <td className="px-4 py-3 font-medium text-foreground">
+                          <Link href={`/projects/${params.id}/environments/${env.id}`} className="hover:text-primary hover:underline">
+                            {env.name}
+                          </Link>
+                        </td>
                         <td className="px-4 py-3 text-muted-foreground">{env.cluster}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(env.status)}`}>
@@ -1413,49 +1418,35 @@ print(f"Linked repository: {repo.name} ({repo.id})")`;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-foreground mb-1">{project.name}</h1>
-          <p className="text-sm text-muted-foreground mb-3">{project.description}</p>
-          <div className="flex items-center text-xs text-muted-foreground space-x-4">
-             <span>Last updated: {project.lastUpdated}</span>
-             <span className={`px-2 py-0.5 rounded-full text-xs ${getStatusClasses(project.status)}`}>
-               {project.status}
-             </span>
-          </div>
+            <h1 className="text-3xl font-bold text-foreground">{project.name}</h1>
+            <p className="text-muted-foreground">{project.description}</p>
         </div>
-        <div className="flex space-x-2 flex-shrink-0 mt-4 md:mt-0">
-            <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 flex items-center">
-                <Play className="w-4 h-4 mr-2" /> Trigger Pipeline
-            </button>
-            <button className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/80 flex items-center">
-                <Pencil className="w-4 h-4 mr-2" /> Edit Project
-            </button>
+        <div>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(project.status)}`}>
+                {project.status}
+            </span>
+            <p className="text-xs text-muted-foreground mt-1">Last updated: {project.lastUpdated}</p>
         </div>
       </div>
 
-      <div className="border-b border-border">
-        <nav className="flex -mb-px space-x-6 overflow-x-auto" aria-label="Tabs">
+      <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="border-b border-border w-full justify-start">
           {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center px-1 pb-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
-              }`}
-            >
+            <TabsTrigger key={tab.id} value={tab.id} className="px-3 pb-3">
               <tab.icon className="w-4 h-4 mr-2" />
               {tab.label}
-            </button>
+            </TabsTrigger>
           ))}
-        </nav>
-      </div>
+        </TabsList>
 
-      <div className="py-4">
-         {renderTabContent()}
-      </div>
+        {tabs.map((tab) => (
+          <TabsContent key={tab.id} value={tab.id} className="py-4">
+            {tab.id === activeTab && renderTabContent()}
+          </TabsContent>
+        ))}
+      </Tabs>
 
       {isEnvModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 backdrop-blur-sm">

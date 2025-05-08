@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError # Import ValidationError
 
 from mlpie.api.controllers import config, secrets
-from mlpie.api.routers import repository # Import repository router
+from mlpie.api.routers import repository, datasets, jobs # Import repository, datasets, and jobs routers
 from mlpie.bootstrap import bootstrap_application
 from mlpie.config.manager import get_config_manager
 from mlpie.state_sync.scheduler import shutdown_scheduler # Import scheduler shutdown
@@ -76,6 +76,8 @@ async def health_check():
 app.include_router(config.router)
 app.include_router(secrets.router)
 app.include_router(repository)
+app.include_router(datasets)
+app.include_router(jobs)
 
 # Placeholder for mounting routers
 # from .routers import projects, models, ...

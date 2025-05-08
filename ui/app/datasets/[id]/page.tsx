@@ -19,6 +19,9 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
+// At the top, import the ProfileDatasetButton component
+import ProfileDatasetButton from '@/components/datasets/ProfileDatasetButton';
+
 // --- Type Definitions ---
 interface Pipeline {
   id: string;
@@ -815,12 +818,12 @@ export default function DatasetDetail() {
               </svg>
               Edit
             </button>
-            <button className="bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-2 rounded-md flex items-center text-sm">
-              <svg className="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-              </svg>
-              Analyze
-            </button>
+            <ProfileDatasetButton 
+              datasetId={datasetId} 
+              datasetName={dataset.name}
+              lastProfiledAt={dataset.lastUpdated}
+              onSuccess={() => setActiveTab('overview')}
+            />
           </div>
         </div>
         

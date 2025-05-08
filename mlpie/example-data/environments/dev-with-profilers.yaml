@@ -1,0 +1,60 @@
+apiVersion: mlpie.ai/v1
+kind: Environment
+metadata:
+  name: "development"
+  description: "Development environment with profiler configurations"
+  version: "v1.0.0"
+  labels:
+    - "dev"
+    - "testing"
+spec:
+  projectRef:
+    name: "sample-ml-project"
+  
+  # Training platforms configuration
+  training_platforms:
+    - type: "local"
+      config:
+        max_workers: 4
+        workspace_dir: "/tmp/mlpie/workspace"
+  
+  # Feature stores configuration
+  feature_stores:
+    - type: "local"
+      config:
+        data_dir: "/tmp/mlpie/features"
+  
+  # Profiler configurations
+  profilers:
+    default: "pandas_profiler"  # Default profiler for this environment
+    configurations:
+      - name: "pandas_profiler"
+        type: "pandas"
+        config:
+          correlation_threshold: 0.7
+          include_percentiles: true
+          numerical_distribution_analysis: true
+          text_length_analysis: true
+          max_memory_usage: "4G"
+          
+      - name: "minimal_profiler" 
+        type: "pandas"
+        config:
+          correlation_threshold: 0.5
+          include_percentiles: false
+          sample_size: 10000
+          numerical_distribution_analysis: false
+          text_length_analysis: false
+          
+      - name: "glue_profiler"
+        type: "aws_glue"
+        enabled: false  # Disabled in dev environment
+        config:
+          region: "us-west-2"
+          role_arn: "arn:aws:iam::123456789012:role/GlueProfilerRole"
+          job_timeout_minutes: 60
+          auth:
+            secretRef:
+              name: "aws-credentials"
+              accessKeyIdKey: "aws_access_key_id"
+              secretAccessKeyKey: "aws_secret_access_key" 
