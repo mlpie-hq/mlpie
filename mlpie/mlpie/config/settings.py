@@ -135,6 +135,58 @@ class APISettings(BaseSettings):
     )
 
 
+class EncryptedDBProviderSettings(BaseSettings):
+    """Settings specific to the EncryptedDBProvider."""
+    model_config = SettingsConfigDict(
+        env_prefix="SECRETS__ENCRYPTED_DB__",
+        case_sensitive=False,
+    )
+    # Made optional for migration generation, but EncryptedDBProvider will fail to initialize if not set at runtime.
+    encryption_key: Optional[str] = Field(
+        default=None, 
+        description="Base64-encoded Fernet key for the EncryptedDBProvider. REQUIRED at runtime. Generate using Fernet.generate_key().decode()"
+    )
+
+
+class SecretsSettings(BaseSettings):
+    """Secrets management settings."""
+    
+    model_config = SettingsConfigDict(
+        env_prefix="SECRETS__",
+        case_sensitive=False,
+    )
+    
+    # Global provider type setting
+    PROVIDER_TYPE: str = Field(
+        default="EncryptedDBProvider",
+        description="The globally active secret provider plugin type."
+    )
+    
+    # Configuration for the EncryptedDBProvider
+    # The attribute name should match the provider type (lowercase) for convention, 
+    # or be a fixed name if we always expect this one.
+    # For now, using a specific name for clarity as it's the primary built-in.
+    encrypted_db_provider: EncryptedDBProviderSettings = Field(default_factory=EncryptedDBProviderSettings)
+
+    # Removed old provider settings:
+    # FILE_PATH: str
+    # PASSWORD: Optional[str]
+    # ENV_PREFIX: str
+    # ENCRYPTION_KEY: Optional[str] (now part of EncryptedDBProviderSettings)
+    # SALT: Optional[str]
+    
+    @field_validator("PROVIDER_TYPE")
+    @classmethod
+    def validate_provider_type(cls, v: str) -> str:
+        """Validate the provider type (can be extended if more built-in types are added)."""
+        # For now, we only officially support EncryptedDBProvider as built-in
+        # This can be expanded if other providers are bundled or aliased.
+        # External plugins will register with their own names.
+        if v != "EncryptedDBProvider": 
+            # This is a soft validation for now. The plugin system will ultimately check if the named plugin exists.
+            logger.warning(f"SECRETS__PROVIDER_TYPE is set to '{v}', which is not the default 'EncryptedDBProvider'. Ensure this plugin is installed and discoverable.")
+        return v
+
 
 class RootSettings(BaseSettings):
     """
@@ -154,6 +206,7 @@ class RootSettings(BaseSettings):
     git: RootGitRepositorySettings = Field(default_factory=RootGitRepositorySettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     api: APISettings = Field(default_factory=APISettings)
+    secrets: SecretsSettings = Field(default_factory=SecretsSettings)
 
     
     # Application info

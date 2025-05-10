@@ -95,9 +95,8 @@ test-cov-secrets:
 
 # Running Applications
 run-api:
-	@echo "Starting FastAPI development server on http://localhost:8000 ... (NO RELOAD)"
-	@cd mlpie && poetry run uvicorn mlpie.api.main:app --host 0.0.0.0 --port 8000 --log-level info
-
+	@echo "Starting FastAPI development server on http://localhost:8000 ... (WITH RELOAD ENABLED)"
+	@cd mlpie && poetry run uvicorn mlpie.api.main:app --host 0.0.0.0 --port 8000 --log-level info --reload
 
 run-cli:
 	@echo "Running CLI application... (Use --help for options)"

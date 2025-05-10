@@ -19,7 +19,7 @@ from mlpie.api.schemas.config import StatusResponse  # Import StatusResponse for
 
 
 router = APIRouter(
-    prefix="/api/repository",
+    prefix="/repository",
     tags=["repository"],
     responses={404: {"description": "Not found"}},
 )

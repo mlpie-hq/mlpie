@@ -10,10 +10,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mlpie.db.base import get_db_session
+from mlpie.db.connection import get_session
 from mlpie.db.crud.dataset import (
-    get_dataset,
-    get_datasets,
+    get_dataset_by_id,
+    get_all_datasets as get_datasets,
     create_dataset,
     update_dataset,
     delete_dataset
@@ -31,7 +31,7 @@ router = APIRouter(
 
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_datasets(
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
     project_id: Optional[UUID] = None,
@@ -53,9 +53,9 @@ async def list_datasets(
 
 
 @router.get("/{dataset_id}", response_model=Dict[str, Any])
-async def get_dataset_by_id(
+async def get_dataset_by_id_route(
     dataset_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Get a dataset by ID.
@@ -67,7 +67,7 @@ async def get_dataset_by_id(
     Returns:
         Dataset dictionary
     """
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset_by_id(session, dataset_id)
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -79,7 +79,7 @@ async def get_dataset_by_id(
 @router.post("/", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def create_new_dataset(
     dataset_data: Dict[str, Any],
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Create a new dataset.
@@ -99,7 +99,7 @@ async def create_new_dataset(
 async def update_dataset_by_id(
     dataset_id: UUID,
     dataset_data: Dict[str, Any],
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Update a dataset.
@@ -112,7 +112,7 @@ async def update_dataset_by_id(
     Returns:
         Updated dataset dictionary
     """
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset_by_id(session, dataset_id)
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -126,7 +126,7 @@ async def update_dataset_by_id(
 @router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dataset_by_id(
     dataset_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Delete a dataset.
@@ -135,7 +135,7 @@ async def delete_dataset_by_id(
         dataset_id: Dataset ID
         session: Database session
     """
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset_by_id(session, dataset_id)
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -163,7 +163,7 @@ async def profile_dataset(
     dataset_id: UUID,
     profiler_name: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Profile a dataset using the specified profiler.
@@ -201,7 +201,7 @@ async def profile_dataset_preview(
     dataset_id: UUID,
     profiler_name: Optional[str] = None,
     sample_size: int = Query(1000, ge=1, le=10000),
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Generate a quick profile preview for a dataset.
@@ -238,7 +238,7 @@ async def profile_dataset_preview(
 async def configure_dataset_profiler(
     dataset_id: UUID,
     profiler_config: Dict[str, Any],
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Configure the profiler settings for a dataset.
@@ -251,7 +251,7 @@ async def configure_dataset_profiler(
     Returns:
         Updated dataset
     """
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset_by_id(session, dataset_id)
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

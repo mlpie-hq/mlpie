@@ -5,7 +5,6 @@ This module provides database operations for pipelines.
 """
 
 import logging
-import uuid
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy import select, delete
@@ -31,79 +30,46 @@ async def get_pipeline_by_name(session: AsyncSession, name: str) -> Optional[Pip
     return result.scalars().first()
 
 
-async def get_pipeline_by_id(session: AsyncSession, pipeline_id: uuid.UUID) -> Optional[Pipeline]:
+async def get_pipelines(
+    session: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    project_name: Optional[str] = None
+) -> List[Pipeline]:
     """
-    Get a pipeline by ID.
+    Get a list of pipelines.
     
     Args:
         session: Database session
-        pipeline_id: Pipeline ID
+        skip: Number of pipelines to skip
+        limit: Maximum number of pipelines to return
+        project_name: Filter by project name
         
     Returns:
-        Pipeline instance or None if not found
+        List of pipeline objects
     """
-    result = await session.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    return result.scalars().first()
-
-
-async def get_pipelines_by_project(session: AsyncSession, project_id: uuid.UUID) -> List[Pipeline]:
-    """
-    Get all pipelines associated with a project.
+    query = select(Pipeline)
     
-    Args:
-        session: Database session
-        project_id: Project ID
+    if project_name:
+        query = query.where(Pipeline.project_name == project_name)
         
-    Returns:
-        List of Pipeline instances
-    """
-    result = await session.execute(
-        select(Pipeline).where(Pipeline.project_id == project_id)
-    )
-    return result.scalars().all()
+    query = query.offset(skip).limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())
 
 
-async def get_all_pipelines(session: AsyncSession) -> List[Pipeline]:
-    """
-    Get all pipelines.
-    
-    Args:
-        session: Database session
-        
-    Returns:
-        List of Pipeline instances
-    """
-    result = await session.execute(select(Pipeline))
-    return result.scalars().all()
-
-
-async def get_active_pipelines(session: AsyncSession) -> List[Pipeline]:
-    """
-    Get all active pipelines.
-    
-    Args:
-        session: Database session
-        
-    Returns:
-        List of active Pipeline instances
-    """
-    result = await session.execute(
-        select(Pipeline).where(Pipeline.active == True)
-    )
-    return result.scalars().all()
-
-
-async def create_pipeline(session: AsyncSession, pipeline: Pipeline) -> Pipeline:
+async def create_pipeline(session: AsyncSession, pipeline_data: Dict[str, Any]) -> Pipeline:
     """
     Create a new pipeline.
     
     Args:
         session: Database session
-        pipeline: Pipeline instance
+        pipeline_data: Pipeline data dictionary
         
     Returns:
-        Created Pipeline instance
+        Created pipeline object
     """
+    pipeline = Pipeline(**pipeline_data)
     session.add(pipeline)
     await session.commit()
     await session.refresh(pipeline)
@@ -112,38 +78,38 @@ async def create_pipeline(session: AsyncSession, pipeline: Pipeline) -> Pipeline
 
 async def update_pipeline(session: AsyncSession, pipeline: Pipeline) -> Pipeline:
     """
-    Update an existing pipeline.
+    Update a pipeline.
     
     Args:
         session: Database session
-        pipeline: Pipeline instance with updated values
+        pipeline: Pipeline object to update
         
     Returns:
-        Updated Pipeline instance
+        Updated pipeline object
     """
     await session.commit()
     await session.refresh(pipeline)
     return pipeline
 
 
-async def delete_pipeline(session: AsyncSession, pipeline_id: uuid.UUID) -> bool:
+async def delete_pipeline(session: AsyncSession, name: str) -> bool:
     """
     Delete a pipeline.
     
     Args:
         session: Database session
-        pipeline_id: ID of the pipeline to delete
+        name: Pipeline name
         
     Returns:
         True if pipeline was deleted, False if not found
     """
-    result = await session.execute(delete(Pipeline).where(Pipeline.id == pipeline_id))
+    result = await session.execute(delete(Pipeline).where(Pipeline.name == name))
     await session.commit()
     return result.rowcount > 0
 
 
 async def reconcile_pipelines(
-    session: AsyncSession, 
+    session: AsyncSession,
     scanned_pipelines: List[Pipeline]
 ) -> Dict[str, int]:
     """
@@ -165,9 +131,6 @@ async def reconcile_pipelines(
     # Track processed pipelines by name for potential cleanup
     processed_names = set()
     
-    # Resolve project references
-    await _resolve_project_references(session, scanned_pipelines)
-    
     # Process each scanned pipeline
     for pipeline in scanned_pipelines:
         name = pipeline.name
@@ -178,7 +141,7 @@ async def reconcile_pipelines(
         
         if existing_pipeline:
             # Update existing pipeline
-            # We need to preserve ID and created_at
+            # We need to preserve created_at
             created_at = existing_pipeline.created_at
             
             # Update fields from new pipeline
@@ -189,14 +152,24 @@ async def reconcile_pipelines(
             existing_pipeline.code = pipeline.code
             existing_pipeline.labels = pipeline.labels
             existing_pipeline.active = pipeline.active
-            existing_pipeline.project_id = pipeline.project_id
+            existing_pipeline.project_name = pipeline.project_name
             
             # Update in database
             await update_pipeline(session, existing_pipeline)
             counters["updated"] += 1
         else:
             # Create new pipeline
-            await create_pipeline(session, pipeline)
+            await create_pipeline(session, {
+                "name": pipeline.name,
+                "spec": pipeline.spec,
+                "description": pipeline.description,
+                "version": pipeline.version,
+                "engine": pipeline.engine,
+                "code": pipeline.code,
+                "labels": pipeline.labels,
+                "active": pipeline.active,
+                "project_name": pipeline.project_name
+            })
             counters["created"] += 1
     
     # Optional: Mark pipelines not found in scan for cleanup
@@ -210,7 +183,7 @@ async def _resolve_project_references(session: AsyncSession, pipelines: List[Pip
     Resolve project references in pipelines.
     
     This function looks at the projectRef in each pipeline's spec and 
-    resolves it to a project_id by looking up the project by name.
+    resolves it to a project name by looking up the project by name.
     
     Args:
         session: Database session
@@ -230,8 +203,8 @@ async def _resolve_project_references(session: AsyncSession, pipelines: List[Pip
                 # Look up project by name
                 project = await get_project_by_name(session, project_name)
                 if project:
-                    pipeline.project_id = project.id
-                    logger.info(f"Resolved project reference for pipeline {pipeline.name} to project {project_name} (ID: {project.id})")
+                    pipeline.project_name = project.name
+                    logger.info(f"Resolved project reference for pipeline {pipeline.name} to project {project_name}")
                 else:
                     logger.warning(f"Could not resolve project reference '{project_name}' for pipeline {pipeline.name}")
         except Exception as e:

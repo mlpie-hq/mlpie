@@ -50,7 +50,7 @@ export interface RootSettingsResponse {
 export const configService = {
   getCurrentSecretsConfig: async (): Promise<CurrentSecretConfigResponse> => {
     // Note: The API client prepends the base URL
-    return apiClient<CurrentSecretConfigResponse>("/config/secrets/current");
+    return apiClient<CurrentSecretConfigResponse>("/config/secrets");
   },
 
   getRootConfig: async (): Promise<RootSettingsResponse> => {

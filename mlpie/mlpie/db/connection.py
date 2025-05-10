@@ -76,8 +76,8 @@ def setup_database(settings: RootSettings) -> AsyncEngine:
     # Create session factory
     _async_session_factory = async_sessionmaker(
         _engine,
-        expire_on_commit=False,  # Don't expire objects after commit
-        autoflush=False,  # Don't auto-flush changes
+        expire_on_commit=False, 
+        autoflush=False,
     )
     
     return _engine

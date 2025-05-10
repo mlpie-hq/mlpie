@@ -45,8 +45,7 @@ class Project(Base):
     __table_args__ = {"extend_existing": True}
     
     # Core identity fields
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False, index=True)
+    name = Column(String(255), primary_key=True, nullable=False, index=True)
     
     # Full specification as JSON (K8s-like pattern)
     spec = Column(JSON, nullable=False)  # Complete project specification
@@ -69,6 +68,12 @@ class Project(Base):
     datasets = relationship("Dataset", back_populates="project")
     pipelines = relationship("Pipeline", back_populates="project")
     environments = relationship("Environment", back_populates="project")
+    secret_definitions = relationship(
+        "SecretDefinition", 
+        back_populates="project", 
+        cascade="all, delete-orphan",
+        lazy="selectin" # Or "joined" if frequently accessed with Project
+    )
     
     def __repr__(self):
         return f"<Project(name='{self.name}', repository_url='{self.repository_url}', status='{self.status}')>"

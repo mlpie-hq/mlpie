@@ -35,7 +35,7 @@ class Environment(Base):
     spec = Column(JSON, nullable=False, default={})
 
     # Project relationship (optional)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+    project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
     project = relationship("Project", back_populates="environments")
     
     # Jobs relationship
@@ -97,23 +97,32 @@ class Environment(Base):
         return get_default_profiler_from_environment(self.spec)
 
     @classmethod
-    def from_yaml_spec(cls, spec_dict, source_path=None):
+    def from_yaml_spec(cls, spec_dict: Dict[str, Any], source_path: Optional[str] = None) -> 'Environment':
         """
         Create an Environment instance from a YAML specification dictionary.
         
         Args:
-            spec_dict (dict): The parsed YAML dictionary
-            source_path (str): Path to the source YAML file
+            spec_dict: The parsed YAML dictionary
+            source_path: Path to the source YAML file
             
         Returns:
             Environment: A new Environment instance
+            
+        Raises:
+            ValueError: If required fields are missing
         """
         # Extract core fields from spec
         metadata = spec_dict.get("metadata", {})
         spec = spec_dict.get("spec", {})
         
-        return cls(
-            name=metadata.get("name"),
+        # Get name from either root level or metadata
+        name = spec_dict.get("name") or metadata.get("name")
+        if not name:
+            raise ValueError("Environment name is required")
+        
+        # Create instance
+        environment = cls(
+            name=name,
             description=metadata.get("description"),
             version=metadata.get("version"),
             spec=spec_dict,  # Store the entire spec
@@ -121,4 +130,11 @@ class Environment(Base):
             status="Ready",
             active=True,
             source_path=source_path
-        ) 
+        )
+        
+        # Handle project reference
+        project_ref = spec.get("projectRef")
+        if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+            environment.project_name = project_ref.get("name")
+            
+        return environment 

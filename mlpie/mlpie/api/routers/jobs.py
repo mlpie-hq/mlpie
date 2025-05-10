@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from mlpie.db.base import get_db_session
+from mlpie.db.connection import get_session
 from mlpie.db.crud.job import (
     get_job,
     get_jobs,
@@ -20,7 +20,8 @@ from mlpie.db.crud.job import (
     get_active_jobs_count,
     get_failed_jobs_count
 )
-from mlpie.db.crud.environment import get_environment
+from mlpie.db.crud.environment import get_environment_by_id
+from mlpie.db.crud.dataset import get_dataset_by_id
 from mlpie.jobs import JobManager, JobStatus, get_job_manager
 
 
@@ -41,7 +42,7 @@ class ProfileDatasetRequest(BaseModel):
 
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_jobs(
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
     status: Optional[str] = None,
@@ -79,7 +80,7 @@ async def list_jobs(
 @router.get("/{job_id}", response_model=Dict[str, Any])
 async def get_job_by_id(
     job_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Get a job by ID.
@@ -103,7 +104,7 @@ async def get_job_by_id(
 @router.get("/{job_id}/logs", response_model=Dict[str, Any])
 async def get_job_logs(
     job_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Get the logs for a job.
@@ -133,7 +134,7 @@ async def get_job_logs(
 @router.post("/{job_id}/cancel", response_model=Dict[str, Any])
 async def cancel_job(
     job_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Cancel a running job.
@@ -177,7 +178,7 @@ async def cancel_job(
 @router.post("/profile-dataset", response_model=Dict[str, Any])
 async def create_profile_job(
     request: ProfileDatasetRequest,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Create a job to profile a dataset.
@@ -189,11 +190,9 @@ async def create_profile_job(
     Returns:
         Dictionary with job information
     """
-    from mlpie.db.crud.dataset import get_dataset
-    
     # Get the dataset
     dataset_id = UUID(request.dataset_id) if request.dataset_id else None
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset_by_id(session, dataset_id)
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -204,7 +203,7 @@ async def create_profile_job(
     environment = None
     if request.environment_id:
         environment_id = UUID(request.environment_id) if request.environment_id else None
-        environment = await get_environment(session, environment_id)
+        environment = await get_environment_by_id(session, environment_id)
         if not environment:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -244,7 +243,7 @@ async def create_profile_job(
 
 @router.get("/stats/count", response_model=Dict[str, int])
 async def get_job_stats(
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Get job statistics.

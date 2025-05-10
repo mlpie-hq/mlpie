@@ -139,9 +139,9 @@ async def test_delete_config_value(async_client, test_session):
 
 @pytest.mark.asyncio
 async def test_get_current_secrets_config(async_client):
-    """Test the GET /config/secrets/current endpoint."""
+    """Test the GET /config/secrets endpoint."""
     # Get the current secrets config
-    response = await async_client.get("/config/secrets/current")
+    response = await async_client.get("/config/secrets")
     assert response.status_code == status.HTTP_200_OK
     
     data = response.json()

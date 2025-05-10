@@ -52,7 +52,7 @@ export default function SyncPage() {
     try {
       setSyncing(true);
       // Call the API endpoint to trigger sync
-      const response = await fetch('/api/repository/sync', { 
+      const response = await fetch('/api/v1/repository/sync', { 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

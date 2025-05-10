@@ -621,7 +621,7 @@ class EnvironmentScanner(EntityScanner):
             # Create environment instance with basic fields
             from mlpie.db.models.environment import Environment
             environment = Environment(
-                name=metadata.get("name"),
+                name=content.get("name") or metadata.get("name"),  # Try root level first, then metadata
                 description=metadata.get("description"),
                 version=metadata.get("version"),
                 spec=content,
@@ -634,9 +634,7 @@ class EnvironmentScanner(EntityScanner):
             # Handle project reference
             project_ref = spec.get("projectRef")
             if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-                # We'll need to resolve this project name to an ID when reconciling
-                # Store the project name in the spec for now
-                environment.project_id = None  # Will be resolved during reconciliation
+                environment.project_name = project_ref.get("name")  # Use project_name instead of project_id
                 
             return environment
                 

@@ -125,8 +125,9 @@ class PluginRegistry:
                     
                     # Look for plugin classes in the module
                     for _, obj in inspect.getmembers(module, inspect.isclass):
-                        # Check if it's a plugin class (but not the base Plugin class)
+                        # Check if it's a plugin class (but not the base Plugin class or an abstract class)
                         if (issubclass(obj, Plugin) and obj is not Plugin and 
+                                not inspect.isabstract(obj) and # Exclude abstract classes
                                 obj.__module__ == module.__name__):
                             try:
                                 # Register the plugin
@@ -216,36 +217,58 @@ class PluginRegistry:
         """
         # Create a unique key for the plugin instance
         instance_key = f"{plugin_type.value}:{plugin_name}"
+        logger.debug(f"Getting plugin instance for '{instance_key}'")
         
         # Return existing instance if available
         if instance_key in self._instances:
+            logger.debug(f"Found existing instance for '{instance_key}': {self._instances[instance_key]}")
+            # Check if the instance is properly initialized
+            if hasattr(self._instances[instance_key], 'initialized'):
+                logger.debug(f"Plugin '{instance_key}' initialized state: {self._instances[instance_key].initialized}")
             return self._instances[instance_key]
         
+        logger.debug(f"No existing instance for '{instance_key}', creating new one")
+        
         # Get the plugin class
-        plugin_class = self.get_plugin_class(plugin_type, plugin_name)
+        try:
+            plugin_class = self.get_plugin_class(plugin_type, plugin_name)
+            logger.debug(f"Found plugin class for '{instance_key}': {plugin_class}")
+        except Exception as e:
+            logger.error(f"Failed to get plugin class for '{instance_key}': {str(e)}")
+            raise
         
         try:
             # Create a new instance
+            logger.debug(f"Creating new instance of '{instance_key}'")
             plugin_instance = plugin_class()
+            logger.debug(f"Created new instance: {plugin_instance}")
             
             # Initialize the plugin
             if config is not None:
-                # Validate the configuration (Synchronous call)
-                validation_errors = plugin_instance.validate_config(config)
+                logger.debug(f"Validating configuration for '{instance_key}': {config}")
+                # Validate the configuration
+                validation_errors = await plugin_instance.validate_config(config)
                 if validation_errors:
                     error_messages = "; ".join(f"{key}: {msg}" for key, msg in validation_errors.items())
+                    logger.error(f"Invalid configuration for plugin '{plugin_name}': {error_messages}")
                     raise PluginInitializationError(
                         f"Invalid configuration for plugin '{plugin_name}': {error_messages}"
                     )
                 
+                logger.debug(f"Initializing plugin '{instance_key}' with config: {config}")
                 # Initialize with the validated configuration (Asynchronous call)
                 success = await plugin_instance.initialize(config)
+                logger.debug(f"Plugin '{instance_key}' initialization result: {success}")
                 if not success:
+                    logger.error(f"Failed to initialize plugin '{plugin_name}'")
                     raise PluginInitializationError(
                         f"Failed to initialize plugin '{plugin_name}'"
                     )
+            else:
+                logger.debug(f"No configuration provided for '{instance_key}', skipping initialization")
             
             # Cache the instance
+            logger.debug(f"Caching instance for '{instance_key}'")
             self._instances[instance_key] = plugin_instance
             
             return plugin_instance

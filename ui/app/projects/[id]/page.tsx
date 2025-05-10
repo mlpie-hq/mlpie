@@ -7,6 +7,9 @@ import { Server, Package, BarChart2, FlaskConical, Settings, PlusCircle, Trash2,
 import MultiMethodInterface, { UIFormField, CodeExample, FormData } from '@/components/MultiMethodInterface';
 import { useProject } from '@/contexts/ProjectContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useProjectSecrets } from '@/hooks/useProjectSecrets';
+import { secretsService, SecretKeyValue } from '@/services/secretsService';
+import { toast } from "sonner";
 
 // Define GitRepository Type with name
 type GitRepository = {
@@ -37,11 +40,6 @@ type ProjectDataset = {
 };
 
 // Define Secret Type
-type SecretKeyValue = {
-  key: string;
-  value: string;
-};
-
 type Secret = {
   id: string;
   name: string;
@@ -202,11 +200,13 @@ const getDatasetTypeClasses = (type: string) => {
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const projectId = params.id ? parseInt(params.id as string, 10) : null;
+  // Convert to numeric ID for mock data lookup, but keep string format for API calls
+  const projectId = params.id as string;
+  const numericProjectId = projectId ? parseInt(projectId, 10) : 0;
   
   const { setSelectedProject, setSelectedEnvironment } = useProject();
   const [activeTab, setActiveTab] = useState('overview');
-  const initialProjectData = initialProjects.find(p => p.id === projectId);
+  const initialProjectData = initialProjects.find(p => p.id === numericProjectId);
   
   // --- State for Environments --- 
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -225,20 +225,39 @@ export default function ProjectDetailPage() {
   const [repoNameMMI, setRepoNameMMI] = useState('');
   const [repoUrlMMI, setRepoUrlMMI] = useState('');
 
-  // --- State for Secrets ---
-  const [secrets, setSecrets] = useState<Secret[]>([]);
+  // --- State for Secrets using TanStack Query ---
   const [isSecretModalOpen, setIsSecretModalOpen] = useState(false);
-  const [currentSecret, setCurrentSecret] = useState<Secret | null>(null);
+  const [currentSecretId, setCurrentSecretId] = useState<string | null>(null);
   const [secretName, setSecretName] = useState('');
   const [secretValues, setSecretValues] = useState<SecretKeyValue[]>([{ key: '', value: '' }]);
   const [showSecretValues, setShowSecretValues] = useState<Record<string, boolean>>({});
+
+  // Use the project secrets hook
+  const {
+    secretDefinitions,
+    isLoading: isLoadingSecrets,
+    isError: isErrorSecrets,
+    error: secretsError,
+    createSecret,
+    isCreating,
+    updateSecretValues,
+    isUpdating,
+    deleteSecret,
+    isDeleting
+  } = useProjectSecrets(projectId || '', {
+    onSuccessCreate: () => handleCloseSecretModal(),
+    onSuccessUpdate: () => handleCloseSecretModal(),
+  });
+
+  // State to hold fetched secret values for viewing/editing, mapping secret name to its values
+  const [fetchedSecretValues, setFetchedSecretValues] = useState<Record<string, SecretKeyValue[]>>({});
+  const [isLoadingSecretValues, setIsLoadingSecretValues] = useState<Record<string, boolean>>({});
 
   // Effect to initialize states
   useEffect(() => {
     if (initialProjectData) {
       setEnvironments(initialProjectData.environments);
       setGitRepos(initialProjectData.gitRepos);
-      setSecrets(initialProjectData.secrets || []);
       
       // Update the global context with this project
       setSelectedProject(initialProjectData);
@@ -375,12 +394,32 @@ export default function ProjectDetailPage() {
   // --- End Git Repo Handlers ---
 
   // --- Handlers for Secret CRUD ---
-  const handleOpenSecretModal = (secret: Secret | null = null) => {
-    setCurrentSecret(secret);
-    if (secret) {
-      setSecretName(secret.name);
-      setSecretValues([...secret.values]);
+  const handleOpenSecretModal = async (secretDefinitionId: string | null = null) => {
+    if (secretDefinitionId) {
+      const definition = secretDefinitions.find(def => def.id === secretDefinitionId);
+      if (definition) {
+        setCurrentSecretId(definition.id);
+        setSecretName(definition.name);
+        if (!fetchedSecretValues[definition.name] || Object.keys(fetchedSecretValues[definition.name]).length === 0) {
+          setIsLoadingSecretValues(prev => ({ ...prev, [definition.name]: true }));
+          try {
+            const valuesData = await secretsService.getProjectSecretValues(projectId, definition.name);
+            setFetchedSecretValues(prev => ({ ...prev, [definition.name]: valuesData.values }));
+            setSecretValues(valuesData.values);
+          } catch (error) {
+            toast.error(`Failed to fetch values for secret ${definition.name}: ${(error as Error).message}`);
+            setSecretValues([{ key: '', value: '' }]);
+          }
+          setIsLoadingSecretValues(prev => ({ ...prev, [definition.name]: false }));
+        } else {
+          setSecretValues(fetchedSecretValues[definition.name]);
+        }
+      } else {
+        toast.error("Secret definition not found.");
+        return;
+      }
     } else {
+      setCurrentSecretId(null);
       setSecretName('');
       setSecretValues([{ key: '', value: '' }]);
     }
@@ -389,73 +428,82 @@ export default function ProjectDetailPage() {
 
   const handleCloseSecretModal = () => {
     setIsSecretModalOpen(false);
-    setCurrentSecret(null);
+    setCurrentSecretId(null);
     setSecretName('');
     setSecretValues([{ key: '', value: '' }]);
   };
 
   const handleAddSecretKeyValue = () => {
-    setSecretValues([...secretValues, { key: '', value: '' }]);
+    setSecretValues(prev => [...prev, { key: '', value: '' }]);
   };
 
   const handleRemoveSecretKeyValue = (index: number) => {
-    const newValues = [...secretValues];
-    newValues.splice(index, 1);
-    setSecretValues(newValues);
+    setSecretValues(prev => {
+      const newValues = [...prev];
+      newValues.splice(index, 1);
+      return newValues;
+    });
   };
 
   const handleUpdateSecretKeyValue = (index: number, field: 'key' | 'value', newValue: string) => {
-    const newValues = [...secretValues];
-    newValues[index][field] = newValue;
-    setSecretValues(newValues);
+    setSecretValues(prev => {
+      const newValues = [...prev];
+      newValues[index][field] = newValue;
+      return newValues;
+    });
   };
 
   const handleSaveSecret = () => {
     if (!secretName) {
-      alert("Secret name is required.");
+      toast.error("Secret name is required.");
       return;
     }
-
-    // Validate that all keys and values are filled
-    const hasEmptyFields = secretValues.some(kv => !kv.key || !kv.value);
+    const hasEmptyFields = secretValues.some(kv => !kv.key); // Value can be empty string, but key must exist
     if (hasEmptyFields) {
-      alert("All key-value pairs must have both key and value filled.");
+      toast.error("All secret entries must have a key.");
       return;
     }
-
-    // Check for duplicate keys
     const keys = secretValues.map(kv => kv.key);
     if (new Set(keys).size !== keys.length) {
-      alert("Secret keys must be unique.");
+      toast.error("Secret keys must be unique within this bundle.");
       return;
     }
 
-    const newSecretData: Secret = {
-      id: currentSecret ? currentSecret.id : `secret-${Date.now()}`,
-      name: secretName,
-      values: secretValues,
-      createdAt: currentSecret ? currentSecret.createdAt : new Date().toLocaleDateString()
-    };
-
-    if (currentSecret) {
-      setSecrets(prev => prev.map(s => s.id === currentSecret.id ? newSecretData : s));
+    if (currentSecretId) { // currentSecretId stores the UUID of the definition being edited
+      // Updating values of an existing secret
+      updateSecretValues({ secretName: secretName, values: secretValues });
     } else {
-      setSecrets(prev => [...prev, newSecretData]);
+      // Creating new secret
+      createSecret({
+        secret_name: secretName,
+        values: secretValues,
+        description: '' // TODO: Add description field to modal if desired
+      });
     }
-
-    handleCloseSecretModal();
   };
 
-  const handleDeleteSecret = (idToDelete: string) => {
+  const handleDeleteSecret = (secretNameToDelete: string) => { // Changed parameter from secretId to secretNameToDelete
     if (confirm("Are you sure you want to delete this secret? This action cannot be undone.")) {
-      setSecrets(prev => prev.filter(s => s.id !== idToDelete));
+      deleteSecret(secretNameToDelete);
     }
   };
 
-  const toggleSecretValueVisibility = (secretId: string) => {
+  const toggleSecretValueVisibility = async (secretDefName: string) => {
+    if (!showSecretValues[secretDefName] && (!fetchedSecretValues[secretDefName] || Object.keys(fetchedSecretValues[secretDefName]).length === 0)) {
+      setIsLoadingSecretValues(prev => ({ ...prev, [secretDefName]: true }));
+      try {
+        const valuesData = await secretsService.getProjectSecretValues(projectId, secretDefName);
+        setFetchedSecretValues(prev => ({ ...prev, [secretDefName]: valuesData.values }));
+      } catch (error) {
+        toast.error(`Failed to fetch values for secret ${secretDefName}: ${(error as Error).message}`);
+        setIsLoadingSecretValues(prev => ({ ...prev, [secretDefName]: false }));
+        return;
+      }
+      setIsLoadingSecretValues(prev => ({ ...prev, [secretDefName]: false }));
+    }
     setShowSecretValues(prev => ({
       ...prev,
-      [secretId]: !prev[secretId]
+      [secretDefName]: !prev[secretDefName]
     }));
   };
 
@@ -518,325 +566,6 @@ export default function ProjectDetailPage() {
             <div className="bg-card p-4 rounded-lg border border-border">
               <h4 className="text-sm font-medium text-foreground mb-3">Recent Activity</h4>
               <p className="text-xs text-muted-foreground">No recent activity recorded.</p>
-            </div>
-          </div>
-        );
-      case 'performance':
-        return (
-          <div>
-            <div className="bg-white rounded-lg border border-gray-200 mb-6">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">Key Metrics</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 p-6">
-                <div>
-                  <p className="text-gray-500 text-sm">Accuracy</p>
-                  <p className="font-bold text-3xl text-gray-800">92.0%</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-sm">Precision</p>
-                  <p className="font-bold text-3xl text-gray-800">89.0%</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-sm">Recall</p>
-                  <p className="font-bold text-3xl text-gray-800">94.0%</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-sm">F1 Score</p>
-                  <p className="font-bold text-3xl text-gray-800">91.0%</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg border border-gray-200">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">Feature Importance</h3>
-              </div>
-              <div className="p-6 space-y-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-medium">tenure</p>
-                    <p className="text-xs text-gray-500">numeric</p>
-                  </div>
-                  <div className="flex items-center">
-                    <div className="w-48 h-4 bg-gray-200 rounded-full mr-3">
-                      <div className="h-4 bg-blue-600 rounded-full" style={{ width: '28%' }}></div>
-                    </div>
-                    <span className="text-sm font-medium">28.0%</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-medium">monthly_charges</p>
-                    <p className="text-xs text-gray-500">numeric</p>
-                  </div>
-                  <div className="flex items-center">
-                    <div className="w-48 h-4 bg-gray-200 rounded-full mr-3">
-                      <div className="h-4 bg-blue-600 rounded-full" style={{ width: '21%' }}></div>
-                    </div>
-                    <span className="text-sm font-medium">21.0%</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-medium">total_charges</p>
-                    <p className="text-xs text-gray-500">numeric</p>
-                  </div>
-                  <div className="flex items-center">
-                    <div className="w-48 h-4 bg-gray-200 rounded-full mr-3">
-                      <div className="h-4 bg-blue-600 rounded-full" style={{ width: '18%' }}></div>
-                    </div>
-                    <span className="text-sm font-medium">18.0%</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-medium">contract_type</p>
-                    <p className="text-xs text-gray-500">categorical</p>
-                  </div>
-                  <div className="flex items-center">
-                    <div className="w-48 h-4 bg-gray-200 rounded-full mr-3">
-                      <div className="h-4 bg-blue-600 rounded-full" style={{ width: '12%' }}></div>
-                    </div>
-                    <span className="text-sm font-medium">12.0%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      case 'configuration':
-        return (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-xl font-medium text-gray-900">Model Configuration</h2>
-                <p className="text-sm text-gray-500 mt-1">Parameters and settings for training</p>
-              </div>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                Edit Configuration
-              </button>
-            </div>
-            
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm mb-6">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">Training Parameters</h3>
-              </div>
-              <div className="divide-y divide-gray-200">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6">
-                  <div>
-                    <p className="text-sm text-gray-500">Model Type</p>
-                    <p className="font-medium">XGBoost Classifier</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Learning Rate</p>
-                    <p className="font-medium">0.01</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Max Depth</p>
-                    <p className="font-medium">6</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Number of Estimators</p>
-                    <p className="font-medium">100</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Random State</p>
-                    <p className="font-medium">42</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Subsample</p>
-                    <p className="font-medium">0.8</p>
-                  </div>
-                </div>
-                
-                <div className="p-6">
-                  <h4 className="text-sm font-medium text-gray-900 mb-4">Feature Engineering</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Feature Selection</p>
-                      <p className="font-medium">SHAP-based ranking</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Scaling Method</p>
-                      <p className="font-medium">StandardScaler</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Missing Value Strategy</p>
-                      <p className="font-medium">Mean imputation</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Categorical Encoding</p>
-                      <p className="font-medium">One-hot encoding</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      case 'deployments':
-        return (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-xl font-medium text-gray-900">Deployments</h2>
-                <p className="text-sm text-gray-500 mt-1">Production instances of your models</p>
-              </div>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 flex items-center">
-                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                </svg>
-                Deploy Model
-              </button>
-            </div>
-            
-            {project.models > 0 ? (
-              <div className="space-y-4">
-                <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                    <div className="flex items-center">
-                      <h3 className="text-lg font-medium text-gray-900">Production Endpoint</h3>
-                      <span className="ml-3 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Healthy
-                      </span>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button className="px-3 py-1 bg-white border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">
-                        Logs
-                      </button>
-                      <button className="px-3 py-1 bg-white border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50">
-                        Settings
-                      </button>
-                    </div>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
-                      <div>
-                        <p className="text-sm text-gray-500">Deployed Model</p>
-                        <p className="font-medium">ChurnPredictor-v2</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Endpoint URL</p>
-                        <p className="font-medium text-blue-600">/api/v1/predict/churn</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Deployed On</p>
-                        <p className="font-medium">5 days ago</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-gray-100">
-                      <h4 className="text-sm font-medium text-gray-900 mb-2">Traffic</h4>
-                      <div className="flex space-x-4 text-sm">
-                        <div>
-                          <span className="font-medium">2,345</span>
-                          <span className="text-gray-500 ml-1">requests today</span>
-                        </div>
-                        <div>
-                          <span className="font-medium">45ms</span>
-                          <span className="text-gray-500 ml-1">avg. latency</span>
-                        </div>
-                        <div>
-                          <span className="font-medium">99.9%</span>
-                          <span className="text-gray-500 ml-1">uptime</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8 text-center">
-                <div className="text-gray-400 mb-3">
-                  <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
-                  </svg>
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-1">No deployments yet</h3>
-                <p className="text-gray-500 max-w-sm mx-auto mb-4">Deploy your models to production to make them accessible via API endpoints.</p>
-                <button className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                  Deploy a Model
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      case 'training_history':
-        return (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-xl font-medium text-gray-900">Training History</h2>
-                <p className="text-sm text-gray-500 mt-1">Record of model training runs</p>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">Recent Training Runs</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run ID</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Started At</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Accuracy</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    <tr>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">run_123456</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">ChurnPredictor-v3</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Yesterday at 3:45 PM</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">45m 12s</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Completed
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">91.2%</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button className="text-blue-600 hover:text-blue-900">View Details</button>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">run_123455</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">ChurnPredictor-v2</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">5 days ago</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">38m 05s</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Completed
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">87.5%</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button className="text-blue-600 hover:text-blue-900">View Details</button>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">run_123454</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">ChurnPredictor-v1</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">1 week ago</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">42m 30s</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Completed
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">85.2%</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button className="text-blue-600 hover:text-blue-900">View Details</button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
             </div>
           </div>
         );
@@ -1203,68 +932,62 @@ export default function ProjectDetailPage() {
                </button>
              </div>
 
-             {secrets.length > 0 ? (
-              <div className="bg-card border border-border rounded-lg"> 
-                 <table className="w-full text-sm"> 
-                   <thead className="bg-secondary/50">
-                     <tr>
-                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Name</th>
-                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Key-Value Pairs</th>
-                       <th className="px-4 py-3 font-medium text-muted-foreground text-left">Created At</th>
-                       <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
-                     </tr>
-                   </thead>
-                   <tbody>
-                     {secrets.map((secret: Secret, index: number) => (
-                       <tr key={secret.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
-                         <td className="px-4 py-3 align-top font-medium text-foreground">{secret.name}</td> 
-                         <td className="px-4 py-3 align-top">
-                           <div className="flex items-center mb-1">
-                             <span className="text-xs text-muted-foreground mr-2">{secret.values.length} key-value pairs</span>
-                             <button 
-                               onClick={() => toggleSecretValueVisibility(secret.id)}
-                               className="p-1 text-xs text-muted-foreground hover:text-primary rounded"
-                             >
-                               {showSecretValues[secret.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                             </button>
-                           </div>
-                           <div className="space-y-1 max-w-xs">
-                             {secret.values.map((kv, kvIndex) => (
-                               <div key={kvIndex} className="flex items-center">
-                                 <span className="text-xs font-medium text-foreground mr-1">{kv.key}:</span>
-                                 <span className="text-xs text-muted-foreground font-mono">
-                                   {showSecretValues[secret.id] ? kv.value : '••••••••'}
-                                 </span>
-                               </div>
-                             ))}
-                           </div>
-                         </td>
-                         <td className="px-4 py-3 text-muted-foreground text-xs align-top">{secret.createdAt}</td> 
-                         
-                         <td className="px-4 py-3 text-right align-top whitespace-nowrap"> 
-                           <div className="flex space-x-1 justify-end">
-                             <button 
-                               onClick={() => handleOpenSecretModal(secret)}
-                               className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded"
-                               title="Edit Secret"
-                             >
-                               <Edit className="w-4 h-4" />
-                             </button>
-                             <button 
-                               onClick={() => handleDeleteSecret(secret.id)}
-                               className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
-                               title="Delete Secret"
-                             >
-                               <Trash2 className="w-4 h-4" />
-                             </button>
-                           </div>
-                         </td>
-                       </tr>
-                     ))}
-                   </tbody>
-                 </table>
+             {isLoadingSecrets && (
+               <div className="flex justify-center py-8">
+                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                </div>
-             ) : (
+             )}
+
+             {isErrorSecrets && (
+               <div className="bg-destructive/10 p-4 rounded-md text-destructive">
+                 <p>Error loading secrets: {secretsError?.message || 'Unknown error'}</p>
+               </div>
+             )}
+
+             {!isLoadingSecrets && !isErrorSecrets && secretDefinitions.length > 0 ? (
+              <div className="space-y-4">
+                {secretDefinitions.map((secretDef, index) => (
+                  <div key={secretDef.id} className={`bg-white shadow sm:rounded-lg p-4 ${index % 2 === 0 ? '' : 'bg-gray-50/50'}`}>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="text-lg font-medium text-gray-900">{secretDef.name}</h3>
+                        {secretDef.description && <p className="text-sm text-gray-500 mt-1">{secretDef.description}</p>}
+                        <p className="text-xs text-gray-400 mt-1">Created: {new Date(secretDef.created_at).toLocaleDateString()}</p>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button onClick={() => toggleSecretValueVisibility(secretDef.name)} title={showSecretValues[secretDef.name] ? 'Hide Values' : 'Show Values'} className="p-1 text-gray-500 hover:text-gray-700">
+                          {isLoadingSecretValues[secretDef.name] ? <RefreshCw size={18} className="animate-spin" /> : (showSecretValues[secretDef.name] ? <EyeOff size={18} /> : <Eye size={18} />)}
+                        </button>
+                        <button onClick={() => handleOpenSecretModal(secretDef.id)} title="Edit Secret" className="p-1 text-gray-500 hover:text-blue-600">
+                          <Edit size={18} />
+                        </button>
+                        <button onClick={() => handleDeleteSecret(secretDef.name)} title="Delete Secret" className="p-1 text-gray-500 hover:text-red-600">
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </div>
+                    {showSecretValues[secretDef.name] && fetchedSecretValues[secretDef.name] && (
+                      <div className="mt-3 border-t border-gray-200 pt-3">
+                        <dl className="space-y-2">
+                          {(fetchedSecretValues[secretDef.name] || []).map((kv: SecretKeyValue, kvIndex: number) => (
+                            <div key={kvIndex} className="grid grid-cols-3 gap-2 items-center">
+                              <dt className="text-sm font-medium text-gray-500 truncate col-span-1">{kv.key}</dt>
+                              <dd className="text-sm text-gray-900 col-span-2 break-all bg-gray-50 p-2 rounded">{kv.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        {(fetchedSecretValues[secretDef.name] || []).length === 0 && <p className='text-sm text-gray-500'>No key-value pairs defined.</p>}
+                      </div>
+                    )}
+                    {showSecretValues[secretDef.name] && !fetchedSecretValues[secretDef.name] && !isLoadingSecretValues[secretDef.name] && (
+                      <div className="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-500">
+                        Click the eye icon again to attempt to load values or add values by editing.
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+             ) : !isLoadingSecrets && (
                <div className="bg-card p-6 rounded-lg border border-border text-center">
                    <KeyRound className="mx-auto h-12 w-12 text-muted-foreground"/>
                    <h3 className="mt-2 text-sm font-semibold text-foreground">No secrets configured for this project yet.</h3>
@@ -1512,112 +1235,121 @@ print(f"Linked repository: {repo.name} ({repo.id})")`;
       )}
 
       {isSecretModalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-background w-full max-w-2xl rounded-lg shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
-             <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
-               <h3 className="text-lg font-semibold text-foreground">
-                 {currentSecret ? 'Edit Secret' : 'Add New Secret'}
-               </h3>
-               <button 
-                 className="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"
-                 onClick={handleCloseSecretModal}
-                 title="Close"
-                 aria-label="Close dialog"
-               >
-                 <X className="w-5 h-5" />
-               </button>
-             </div>
-             <div className="p-6 overflow-y-auto flex-1">
-               <form onSubmit={(e) => { e.preventDefault(); handleSaveSecret(); }}>
-                 <div className="space-y-5">
-                   <div>
-                     <label htmlFor="secret-name" className="block text-sm font-medium text-foreground mb-1">
-                       Secret Name
-                     </label>
-                     <input
-                       type="text"
-                       id="secret-name"
-                       value={secretName}
-                       onChange={(e) => setSecretName(e.target.value)}
-                       className="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                       placeholder="e.g., AWS Credentials, Database Connection"
-                       required
-                     />
-                   </div>
-                   
-                   <div>
-                     <div className="flex justify-between items-center mb-2">
-                       <label className="block text-sm font-medium text-foreground">
-                         Secret Values
-                       </label>
-                       <button
-                         type="button"
-                         onClick={handleAddSecretKeyValue}
-                         className="inline-flex items-center text-xs text-primary hover:text-primary/80"
-                       >
-                         <Plus className="w-3 h-3 mr-1" />
-                         Add Key-Value Pair
-                       </button>
-                     </div>
-                     
-                     <div className="space-y-3">
-                       {secretValues.map((kv, index) => (
-                         <div key={index} className="flex items-start gap-2">
-                           <div className="flex-1">
-                             <input
-                               type="text"
-                               value={kv.key}
-                               onChange={(e) => handleUpdateSecretKeyValue(index, 'key', e.target.value)}
-                               className="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                               placeholder="Key"
-                               required
-                             />
-                           </div>
-                           <div className="flex-1">
-                             <input
-                               type="password"
-                               value={kv.value}
-                               onChange={(e) => handleUpdateSecretKeyValue(index, 'value', e.target.value)}
-                               className="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-                               placeholder="Value"
-                               required
-                             />
-                           </div>
-                           {secretValues.length > 1 && (
-                             <button
-                               type="button"
-                               onClick={() => handleRemoveSecretKeyValue(index)}
-                               className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
-                               title="Remove key-value pair"
-                             >
-                               <X className="w-4 h-4" />
-                             </button>
-                           )}
-                         </div>
-                       ))}
-                     </div>
-                   </div>
-                 </div>
-                 
-                 <div className="mt-6 flex justify-end space-x-3">
-                   <button
-                     type="button"
-                     onClick={handleCloseSecretModal}
-                     className="px-4 py-2 border border-border text-muted-foreground rounded-md text-sm hover:bg-secondary"
-                   >
-                     Cancel
-                   </button>
-                   <button
-                     type="submit"
-                     className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90"
-                   >
-                     {currentSecret ? 'Update Secret' : 'Create Secret'}
-                   </button>
-                 </div>
-               </form>
-             </div>
-          </div>
-        </div>
+              <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
+                <h3 className="text-lg font-semibold text-foreground">
+                  {currentSecretId ? 'Edit Secret' : 'Add New Secret'}
+                </h3>
+                <button 
+                  className="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"
+                  onClick={handleCloseSecretModal}
+                  title="Close"
+                  aria-label="Close dialog"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 overflow-y-auto flex-1">
+                <form onSubmit={(e) => { e.preventDefault(); handleSaveSecret(); }}>
+                  <div className="space-y-5">
+                    <div>
+                      <label className="block text-sm font-medium text-foreground mb-2">
+                        Secret Name
+                      </label>
+                      <input
+                        type="text"
+                        value={secretName}
+                        onChange={(e) => setSecretName(e.target.value)}
+                        className="w-full p-2 border border-border rounded-md bg-secondary text-foreground text-sm"
+                        placeholder="e.g., AWS Credentials, Database Connection"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-foreground">
+                          Secret Values
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleAddSecretKeyValue}
+                          className="inline-flex items-center text-xs text-primary hover:text-primary/80"
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          Add Key-Value Pair
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {secretValues.map((kv, index) => (
+                          <div key={index} className="flex items-start gap-2">
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={kv.key}
+                                onChange={(e) => handleUpdateSecretKeyValue(index, 'key', e.target.value)}
+                                className="w-full p-2 border border-border rounded-md bg-secondary text-foreground text-sm mb-1"
+                                placeholder="Key"
+                                required
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={kv.value}
+                                onChange={(e) => handleUpdateSecretKeyValue(index, 'value', e.target.value)}
+                                className="w-full p-2 border border-border rounded-md bg-secondary text-foreground text-sm mb-1"
+                                placeholder="Value"
+                                required
+                              />
+                            </div>
+                            <div>
+                              {secretValues.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSecretKeyValue(index)}
+                                  className="p-2 text-muted-foreground hover:text-destructive"
+                                  title="Remove this key-value pair"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-6 flex justify-end space-x-3">
+                    <button
+                      type="button"
+                      onClick={handleCloseSecretModal}
+                      className="px-4 py-2 border border-border text-muted-foreground rounded-md text-sm hover:bg-secondary"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90"
+                      disabled={isCreating || isUpdating}
+                    >
+                      {isCreating || isUpdating ? (
+                        <span className="flex items-center">
+                          <span className="animate-spin h-4 w-4 mr-2 border-2 border-t-transparent border-white rounded-full"></span>
+                          {currentSecretId ? 'Updating...' : 'Creating...'}
+                        </span>
+                      ) : (
+                        currentSecretId ? 'Update Secret' : 'Create Secret'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+           </div>
+         </div>
       )}
     </div>
   );

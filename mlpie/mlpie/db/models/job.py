@@ -69,10 +69,10 @@ class Job(Base):
     
     # Relations (optional)
     # A job can be related to various entities like datasets, models, etc.
-    dataset_id = Column(UUID(as_uuid=True), ForeignKey("datasets.id"), nullable=True)
+    dataset_name = Column(String(255), ForeignKey("datasets.name"), nullable=True)
     dataset = relationship("Dataset", back_populates="jobs")
     
-    environment_id = Column(UUID(as_uuid=True), ForeignKey("environments.id"), nullable=True)
+    environment_name = Column(String(255), ForeignKey("environments.name"), nullable=True)
     environment = relationship("Environment", back_populates="jobs")
     
     # For recurring jobs
@@ -96,8 +96,8 @@ class Job(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_by": self.created_by,
-            "dataset_id": str(self.dataset_id) if self.dataset_id else None,
-            "environment_id": str(self.environment_id) if self.environment_id else None,
+            "dataset_name": self.dataset_name,
+            "environment_name": self.environment_name,
             "is_recurring": self.is_recurring,
             "schedule": self.schedule,
             "error": self.error,

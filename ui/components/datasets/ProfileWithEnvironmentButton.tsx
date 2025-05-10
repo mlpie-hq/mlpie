@@ -52,7 +52,7 @@ export function ProfileWithEnvironmentButton({
     const fetchEnvironments = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/environments');
+        const response = await fetch('/api/v1/environments');
         if (!response.ok) {
           throw new Error('Failed to fetch environments');
         }

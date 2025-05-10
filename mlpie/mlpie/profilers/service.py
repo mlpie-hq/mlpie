@@ -14,6 +14,7 @@ from mlpie.db.models.dataset import Dataset
 from mlpie.plugins import PluginType, get_plugin_registry
 from mlpie.profilers.interfaces import DataProfilerInterface
 from mlpie.profilers.base import ProfileConfig, ProfileResult
+from mlpie.db.crud.dataset import get_dataset_by_id
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ class ProfilerService:
     async def profile_dataset(
         self, 
         session: AsyncSession,
-        dataset_id: Union[str, UUID],
+        dataset_id: UUID,
         profiler_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None
     ) -> Optional[ProfileResult]:
@@ -67,22 +68,19 @@ class ProfilerService:
         
         Args:
             session: Database session
-            dataset_id: ID of the dataset to profile
-            profiler_name: Name of the profiler to use (if None, use dataset's configured profiler)
+            dataset_id: Dataset ID
+            profiler_name: Name of the profiler to use (optional)
             config: Profiler configuration options
             
         Returns:
-            ProfileResult containing the profiling results, or None if profiling failed
+            Profiling results or None if failed
         """
-        from mlpie.db.crud.dataset import get_dataset
+        # Get dataset
+        dataset = await get_dataset_by_id(session, dataset_id)
+        if not dataset:
+            raise ValueError(f"Dataset {dataset_id} not found")
         
         try:
-            # Get the dataset
-            dataset = await get_dataset(session, dataset_id)
-            if not dataset:
-                logger.error(f"Dataset not found: {dataset_id}")
-                return None
-            
             # Determine which profiler to use
             profile_plugin_name = profiler_name or dataset.profiler_name
             if not profile_plugin_name:
@@ -136,7 +134,7 @@ class ProfilerService:
     async def profile_dataset_preview(
         self, 
         session: AsyncSession,
-        dataset_id: Union[str, UUID],
+        dataset_id: UUID,
         profiler_name: Optional[str] = None,
         sample_size: int = 1000
     ) -> Optional[ProfileResult]:
@@ -145,22 +143,19 @@ class ProfilerService:
         
         Args:
             session: Database session
-            dataset_id: ID of the dataset to profile
-            profiler_name: Name of the profiler to use (if None, use dataset's configured profiler)
+            dataset_id: Dataset ID
+            profiler_name: Name of the profiler to use (optional)
             sample_size: Number of rows to sample
             
         Returns:
-            ProfileResult containing the preview results, or None if profiling failed
+            Preview profiling results or None if failed
         """
-        from mlpie.db.crud.dataset import get_dataset
+        # Get dataset
+        dataset = await get_dataset_by_id(session, dataset_id)
+        if not dataset:
+            raise ValueError(f"Dataset {dataset_id} not found")
         
         try:
-            # Get the dataset
-            dataset = await get_dataset(session, dataset_id)
-            if not dataset:
-                logger.error(f"Dataset not found: {dataset_id}")
-                return None
-            
             # Determine which profiler to use
             profile_plugin_name = profiler_name or dataset.profiler_name
             if not profile_plugin_name:

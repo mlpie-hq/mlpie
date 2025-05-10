@@ -93,17 +93,46 @@ async def get_available_datasets(session: AsyncSession) -> List[Dataset]:
     return result.scalars().all()
 
 
-async def create_dataset(session: AsyncSession, dataset: Dataset) -> Dataset:
+async def get_datasets(
+    session: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    project_name: Optional[str] = None
+) -> List[Dataset]:
+    """
+    Get a list of datasets.
+    
+    Args:
+        session: Database session
+        skip: Number of datasets to skip
+        limit: Maximum number of datasets to return
+        project_name: Filter by project name
+        
+    Returns:
+        List of dataset objects
+    """
+    query = select(Dataset)
+    
+    if project_name:
+        query = query.where(Dataset.project_name == project_name)
+        
+    query = query.offset(skip).limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def create_dataset(session: AsyncSession, dataset_data: Dict[str, Any]) -> Dataset:
     """
     Create a new dataset.
     
     Args:
         session: Database session
-        dataset: Dataset instance
+        dataset_data: Dataset data dictionary
         
     Returns:
-        Created Dataset instance
+        Created dataset object
     """
+    dataset = Dataset(**dataset_data)
     session.add(dataset)
     await session.commit()
     await session.refresh(dataset)
@@ -112,40 +141,39 @@ async def create_dataset(session: AsyncSession, dataset: Dataset) -> Dataset:
 
 async def update_dataset(session: AsyncSession, dataset: Dataset) -> Dataset:
     """
-    Update an existing dataset.
+    Update a dataset.
     
     Args:
         session: Database session
-        dataset: Dataset instance with updated values
+        dataset: Dataset object to update
         
     Returns:
-        Updated Dataset instance
+        Updated dataset object
     """
     await session.commit()
     await session.refresh(dataset)
     return dataset
 
 
-async def delete_dataset(session: AsyncSession, dataset_id: uuid.UUID) -> bool:
+async def delete_dataset(session: AsyncSession, name: str) -> bool:
     """
     Delete a dataset.
     
     Args:
         session: Database session
-        dataset_id: ID of the dataset to delete
+        name: Dataset name
         
     Returns:
         True if dataset was deleted, False if not found
     """
-    result = await session.execute(delete(Dataset).where(Dataset.id == dataset_id))
+    result = await session.execute(delete(Dataset).where(Dataset.name == name))
     await session.commit()
     return result.rowcount > 0
 
 
 async def reconcile_datasets(
-    session: AsyncSession, 
-    scanned_datasets: List[Dataset],
-    source_path_prefix: Optional[str] = None
+    session: AsyncSession,
+    scanned_datasets: List[Dataset]
 ) -> Dict[str, int]:
     """
     Reconcile scanned datasets with database state.
@@ -153,7 +181,6 @@ async def reconcile_datasets(
     Args:
         session: Database session
         scanned_datasets: List of datasets from scanning
-        source_path_prefix: Optional prefix to add to source paths
         
     Returns:
         Dictionary with counts of created/updated/unchanged datasets
@@ -167,9 +194,6 @@ async def reconcile_datasets(
     # Track processed datasets by name for potential cleanup
     processed_names = set()
     
-    # Resolve project references
-    await _resolve_project_references(session, scanned_datasets)
-    
     # Process each scanned dataset
     for dataset in scanned_datasets:
         name = dataset.name
@@ -180,7 +204,7 @@ async def reconcile_datasets(
         
         if existing_dataset:
             # Update existing dataset
-            # We need to preserve ID and created_at
+            # We need to preserve created_at
             created_at = existing_dataset.created_at
             
             # Update fields from new dataset
@@ -192,7 +216,7 @@ async def reconcile_datasets(
             existing_dataset.port = dataset.port
             existing_dataset.database = dataset.database
             existing_dataset.active = dataset.active
-            existing_dataset.project_id = dataset.project_id
+            existing_dataset.project_name = dataset.project_name
             existing_dataset.labels = dataset.labels
             existing_dataset.credentials_secret_name = dataset.credentials_secret_name
             existing_dataset.credentials_username_key = dataset.credentials_username_key
@@ -203,7 +227,22 @@ async def reconcile_datasets(
             counters["updated"] += 1
         else:
             # Create new dataset
-            await create_dataset(session, dataset)
+            await create_dataset(session, {
+                "name": dataset.name,
+                "spec": dataset.spec,
+                "description": dataset.description,
+                "format": dataset.format,
+                "source_type": dataset.source_type,
+                "host": dataset.host,
+                "port": dataset.port,
+                "database": dataset.database,
+                "active": dataset.active,
+                "project_name": dataset.project_name,
+                "labels": dataset.labels,
+                "credentials_secret_name": dataset.credentials_secret_name,
+                "credentials_username_key": dataset.credentials_username_key,
+                "credentials_password_key": dataset.credentials_password_key
+            })
             counters["created"] += 1
     
     # Optional: Mark datasets not found in scan for cleanup

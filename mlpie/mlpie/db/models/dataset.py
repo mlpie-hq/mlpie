@@ -62,7 +62,7 @@ class Dataset(Base):
     spec = Column(JSON, nullable=False, default={})
     
     # Project relationship (optional)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+    project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
     project = relationship("Project", back_populates="datasets")
     
     # Jobs relationship
@@ -134,8 +134,8 @@ class Dataset(Base):
         if "status" in data:
             dataset.status = data["status"]
             
-        if "project_id" in data:
-            dataset.project_id = data["project_id"]
+        if "project_name" in data:
+            dataset.project_name = data["project_name"]
         
         # Add profiling options if present
         if "profiler_name" in data:

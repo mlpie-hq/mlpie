@@ -1,4 +1,4 @@
- """
+"""
 Job Management Service for MLPie.
 
 This module provides a central service for managing job operations.
@@ -9,7 +9,7 @@ import logging
 from typing import Any, Dict, List, Optional, Union, Callable
 from uuid import UUID
 
-from mlpie.db.base import AsyncSessionLocal
+from mlpie.db.connection import get_session
 from mlpie.db.crud.job import (
     create_job,
     get_job,
@@ -190,7 +190,7 @@ class JobManager:
             name = f"{job_type}-job"
             
         # Create job in database
-        async with AsyncSessionLocal() as session:
+        async with get_session() as session:
             job_data = {
                 "name": name,
                 "job_type": job_type,
@@ -227,7 +227,7 @@ class JobManager:
             job_id = UUID(job_id)
             
         # Get job from database
-        async with AsyncSessionLocal() as session:
+        async with get_session() as session:
             job = await get_job(session, job_id)
             
             if not job:
@@ -324,7 +324,7 @@ class JobManager:
             job_id = UUID(job_id)
             
         # Get job from database
-        async with AsyncSessionLocal() as session:
+        async with get_session() as session:
             job = await get_job(session, job_id)
             
             if not job:
@@ -369,7 +369,7 @@ class JobManager:
             job_id = UUID(job_id)
             
         # Get job from database
-        async with AsyncSessionLocal() as session:
+        async with get_session() as session:
             job = await get_job(session, job_id)
             
             if not job:
@@ -403,7 +403,7 @@ class JobManager:
         Returns:
             List of job objects
         """
-        async with AsyncSessionLocal() as session:
+        async with get_session() as session:
             return await get_jobs(
                 session,
                 skip=skip,

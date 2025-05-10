@@ -2,11 +2,11 @@ from contextlib import asynccontextmanager
 import logging
 import sys # Add sys for exiting
 
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError # Import ValidationError
 
-from mlpie.api.controllers import config, secrets
+from mlpie.api.controllers import config, secrets, projects # Import projects controller
 from mlpie.api.routers import repository, datasets, jobs # Import repository, datasets, and jobs routers
 from mlpie.bootstrap import bootstrap_application
 from mlpie.config.manager import get_config_manager
@@ -49,9 +49,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MLPie Platform API",
-    description="API for the MLPie MLOps Platform",
+    description="MLPie Platform API",
     version="0.1.0",
     lifespan=lifespan,
+    redirect_slashes=False
 )
 
 # Configure CORS using settings
@@ -65,29 +66,32 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+# Create a versioned API router
+api_v1_router = APIRouter(prefix="/api/v1")
 
 @app.get("/health", tags=["Health"], summary="Check API Health")
 async def health_check():
     """Check if the API is running."""
     return {"status": "ok"}
 
+# Register routers under the versioned API router
+api_v1_router.include_router(config.router)
+api_v1_router.include_router(secrets.router)
+api_v1_router.include_router(projects.router)
+api_v1_router.include_router(repository)
+api_v1_router.include_router(datasets)
+api_v1_router.include_router(jobs)
 
-# Register routers
-app.include_router(config.router)
-app.include_router(secrets.router)
-app.include_router(repository)
-app.include_router(datasets)
-app.include_router(jobs)
+# Include the versioned API router in the main app
+app.include_router(api_v1_router)
 
-# Placeholder for mounting routers
-# from .routers import projects, models, ...
-# app.include_router(projects.router)
-# app.include_router(models.router)
-# ...
+# Log all routes
+for route in app.routes:
+    logger.info(f"Route: {route.path} - {route.methods}")
 
 # Add other middleware, exception handlers, etc. here if needed
 
 # Example of a simple root endpoint
 @app.get("/", tags=["Root"], include_in_schema=False)
 async def read_root():
-    return {"message": "Welcome to the MLPie API"} 
+    return {"message": "Life is more than your job! We buy you some time to do what you love."}

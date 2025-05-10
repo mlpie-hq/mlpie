@@ -8,8 +8,8 @@ It handles plugin discovery, registration, and lifecycle management.
 from mlpie.plugins.base import Plugin, PluginMetadata, PluginType, register_plugin
 from mlpie.plugins.registry import plugin_registry, get_plugin_registry
 from mlpie.plugins.discovery import (
-    discover_plugins_from_entry_points,
-    discover_module_providers,
+    discover_external_plugins,
+    discover_built_in_plugins,
     discover_all_plugins,
     get_available_plugins,
 )
@@ -42,8 +42,8 @@ __all__ = [
     "get_plugin_registry",
     
     # Discovery
-    "discover_plugins_from_entry_points",
-    "discover_module_providers",
+    "discover_external_plugins",
+    "discover_built_in_plugins",
     "discover_all_plugins",
     "get_available_plugins",
     

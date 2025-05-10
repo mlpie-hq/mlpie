@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mlpie.db.connection import get_session
 from mlpie.config import get_config_manager, get_root_settings
+from mlpie.config.secrets import get_secrets_config_service
 from mlpie.plugins.base import PluginType
 from mlpie.api.schemas import (
     ConfigValueResponse,
@@ -28,7 +29,6 @@ from mlpie.api.schemas import (
     RootSettingsResponse,
 )
 from pydantic import BaseModel, Field
-from mlpie.secrets.setup import setup_secret_manager
 from mlpie.utils.logger import logger
 
 
@@ -288,7 +288,7 @@ class CurrentSecretConfigResponse(BaseModel):
 
 
 # Secret provider API endpoints
-@router.get("/secrets/current", response_model=CurrentSecretConfigResponse)
+@router.get("/secrets", response_model=CurrentSecretConfigResponse)
 async def get_current_secrets_config():
     """Get the current secret provider configuration.
     
@@ -296,62 +296,8 @@ async def get_current_secrets_config():
     as well as the list of available providers. These settings can only be 
     changed via environment variables before application startup.
     """
-    try:
-        # Get provider type from env vars or settings
-        settings = get_root_settings()
-        
-        # Get provider from environment variable or settings
-        provider_type = os.environ.get(
-            "MLPIE_SECRETS_PROVIDER",
-            settings.secrets.SECRETS_PROVIDER or "file"
-        )
-        
-        # Get config based on provider type
-        config = {}
-        
-        if provider_type == "file":
-            # Get file path from environment or settings
-            file_path = os.environ.get(
-                "MLPIE_SECRETS_FILE",
-                str(settings.secrets.SECRETS_FILE)
-            )
-            config["file_path"] = file_path
-            
-        elif provider_type == "env":
-            # Get prefix from environment or settings
-            prefix = os.environ.get(
-                "MLPIE_SECRETS_ENV_PREFIX",
-                settings.secrets.ENV_PREFIX
-            )
-            config["env_prefix"] = prefix
-            
-        elif provider_type == "db":
-            # No additional config needed for db provider
-            pass
-            
-        # Get the list of available providers
-        try:
-            # Try to get the secret manager to get available providers
-            secret_manager = await setup_secret_manager()
-            available_providers = await secret_manager.get_available_providers()
-        except Exception as e:
-            logger.error(f"Error getting available providers: {str(e)}")
-            # Fallback to default list of providers
-            available_providers = ["file", "env", "db"]
-        
-        return {
-            "provider": provider_type,
-            "config": config,
-            "available_providers": available_providers
-        }
-    except Exception as e:
-        # Log the error but still return a valid response
-        logger.error(f"Error getting current secrets config: {str(e)}")
-        return {
-            "provider": "file",
-            "config": {"file_path": ""},
-            "available_providers": ["file", "env", "db"]
-        }
+    service = get_secrets_config_service()
+    return await service.get_current_config()
 
 
 # --- Root Settings Endpoint ---

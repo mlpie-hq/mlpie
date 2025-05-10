@@ -36,7 +36,7 @@ export function ProfileDatasetButton({
     setLoading(true);
 
     try {
-      const response = await fetch('/api/jobs/profile-dataset', {
+      const response = await fetch('/api/v1/jobs/profile-dataset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

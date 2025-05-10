@@ -42,11 +42,11 @@ export function JobsProgress() {
       setLoading(true);
       
       // Fetch failed jobs
-      const failedResponse = await fetch('/api/jobs?status=failed&limit=5');
+      const failedResponse = await fetch('/api/v1/jobs?status=failed&limit=5');
       const failedData = await failedResponse.json();
       
       // Get details of active jobs
-      const activeJobsResponse = await fetch('/api/jobs?status=running,pending&limit=5');
+      const activeJobsResponse = await fetch('/api/v1/jobs?status=running,pending&limit=5');
       const activeJobsData = await activeJobsResponse.json();
       
       setActiveJobs(activeJobsData || []);

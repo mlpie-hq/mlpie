@@ -1,283 +1,336 @@
 """
 Secret Manager for the MLPie platform.
 
-This module provides a central manager for handling secrets through the plugin system.
-It leverages plugins of type SECRET_PROVIDER for storage backends.
+This manager orchestrates secret operations. It interacts with:
+1. The main database for SecretDefinition metadata (what secret bundles are defined).
+2. A single, globally configured SecretProvider plugin for storing/retrieving actual secret values.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, cast
 
-from mlpie.plugins import (
-    Plugin, 
-    PluginType, 
-    create_plugin, 
-    plugin_registry,
-    discover_all_plugins
-)
-from mlpie.secrets.exceptions import (
-    SecretError, 
-    ProviderNotFoundError, 
-    SecretNotFoundError,
-    ProviderExistsError
-)
-from mlpie.secrets.interfaces import SecretProvider
+from sqlalchemy import select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError, NoResultFound
 
+from mlpie.plugins import PluginType, plugin_registry
+from mlpie.secrets.providers.base import SecretProviderPlugin
+from mlpie.secrets.exceptions import SecretError, ProviderNotFoundError, SecretNotFoundError
+from mlpie.config.settings import SecretsSettings # For type hinting config passed to initialize
+from mlpie.db.connection import get_session_factory # Corrected import
+from mlpie.db.models import Project, SecretDefinition # For DB operations
 
 logger = logging.getLogger(__name__)
 
-
 class SecretManager:
-    """Central manager for handling secrets across different storage backends.
-    
-    This class provides a unified interface for storing and retrieving secrets
-    regardless of the underlying storage mechanism, using the plugin system.
+    """
+    Manages secret definitions (metadata) and delegates value storage/retrieval
+    to a single, globally configured secret provider plugin.
     """
     
     def __init__(self):
-        """Initialize the secret manager."""
-        self.default_provider: Optional[str] = None
-        self._initialized = False
-        self._providers = {}
-        self._config = {}
-    
-    async def initialize(self, config: Dict[str, Any]) -> bool:
-        """Initialize the secret manager with configuration.
+        self._initialized: bool = False
+        self.active_provider: Optional[SecretProviderPlugin] = None
+        self.active_provider_type: Optional[str] = None
+        self._session_factory = None # To store the session factory
+
+    async def initialize(self, config: SecretsSettings) -> bool:
+        """
+        Initialize the SecretManager with the globally configured secret provider.
         
         Args:
-            config: Dictionary containing:
-                - default_provider: Name of the default provider to use
-                - providers: Dictionary mapping provider names to their configurations
+            config: The SecretsSettings section from the application's root configuration.
                 
         Returns:
-            bool: True if initialization was successful
+            True if initialization was successful, False otherwise.
         """
         if self._initialized:
+            logger.info("SecretManager already initialized.")
             return True
             
+        self.active_provider_type = config.PROVIDER_TYPE
+        logger.info(f"Attempting to initialize SecretManager with provider: {self.active_provider_type}")
+
+        provider_specific_config = {}
+        if self.active_provider_type == "EncryptedDBProvider":
+            if config.encrypted_db_provider:
+                provider_specific_config = config.encrypted_db_provider.model_dump()
+            else:
+                 # Should not happen if settings has default_factory, but defensive
+                logger.warning("EncryptedDBProvider config section is missing in SecretsSettings.")
+        else:
+            logger.warning(f"No specific configuration model logic in SecretManager for provider type '{self.active_provider_type}'. Using empty config.")
+
         try:
-            # Ensure plugins are discovered
-            discover_all_plugins()
+            provider_instance = await plugin_registry.get_plugin(
+                plugin_type=PluginType.SECRET_PROVIDER,
+                plugin_name=self.active_provider_type,
+                config=provider_specific_config
+            )
+            self.active_provider = cast(SecretProviderPlugin, provider_instance)
             
-            # Get the default provider name
-            self.default_provider = config.get("default_provider")
-            if not self.default_provider:
-                logger.warning("No default provider specified in configuration")
-                
-                # Try to find a suitable default provider from available plugins
-                provider_classes = plugin_registry.get_plugin_classes(PluginType.SECRET_PROVIDER)
-                if provider_classes:
-                    self.default_provider = next(iter(provider_classes.keys()))
-                    logger.info(f"Using '{self.default_provider}' as default provider")
-                else:
-                    logger.error("No secret provider plugins available")
-                    return False
+            if not self.active_provider or not self.active_provider.initialized:
+                logger.error(f"Failed to get or initialize active secret provider: {self.active_provider_type}")
+                self._initialized = False
+                return False
             
-            # Store the configuration
-            self._config = config
-            
-            # Register all available providers in the registry first
-            for provider_type in plugin_registry.get_plugin_classes(PluginType.SECRET_PROVIDER):
-                logger.info(f"Found provider type: {provider_type}")
+            # Get session factory after provider is initialized (in case provider needs DB too)
+            try:
+                self._session_factory = get_session_factory()
+                logger.info("SecretManager obtained session factory.")
+            except Exception as e:
+                logger.error(f"SecretManager failed to obtain session factory: {e}", exc_info=True)
+                self._initialized = False 
+                return False
             
             self._initialized = True
-            logger.info(f"Secret manager initialized with default provider: {self.default_provider}")
+            logger.info(f"SecretManager initialized successfully with active provider: {self.active_provider_type}")
             return True
             
+        except ProviderNotFoundError:
+            logger.error(f"Configured secret provider plugin '{self.active_provider_type}' not found in registry.")
+            self._initialized = False
+            return False
         except Exception as e:
-            logger.error(f"Failed to initialize secret manager: {str(e)}")
+            logger.error(f"Error initializing SecretManager with provider '{self.active_provider_type}': {e}", exc_info=True)
+            self._initialized = False
             return False
     
-    async def _ensure_initialized(self) -> None:
-        """Ensure the manager is initialized before use.
-        
-        Raises:
-            SecretError: If the manager is not initialized
-        """
-        if not self._initialized:
-            raise SecretError("Secret manager not initialized")
-    
-    async def _get_provider(self, provider_name: Optional[str] = None) -> Plugin:
-        """Get a provider plugin instance.
-        
-        Args:
-            provider_name: Optional provider name to use, defaults to the default provider
-            
-        Returns:
-            Plugin: The provider plugin instance
-            
-        Raises:
-            ProviderNotFoundError: If the provider is not found
-        """
-        await self._ensure_initialized()
-        
-        # Use the default provider if none specified
-        name = provider_name or self.default_provider
-        if not name:
-            raise ProviderNotFoundError("No provider specified and no default provider set")
-            
-        try:
-            # Get provider configuration
-            providers_config = self._config.get("providers", {})
-            provider_config = providers_config.get(name, {})
-            
-            # Create the plugin if it doesn't exist yet
-            provider = None
-            try:
-                provider = await plugin_registry.get_plugin(PluginType.SECRET_PROVIDER, name)
-            except:
-                # Create the provider with configuration
-                logger.info(f"Creating provider {name} with config: {provider_config}")
-                provider = await create_plugin(
-                    PluginType.SECRET_PROVIDER,
-                    name,
-                    provider_config
-                )
-            
-            if not provider:
-                raise ProviderNotFoundError(f"Failed to create provider '{name}'")
-                
-            return provider
-            
-        except Exception as e:
-            logger.error(f"Failed to get provider '{name}': {str(e)}")
-            raise ProviderNotFoundError(f"Failed to get provider '{name}': {str(e)}")
-    
-    async def get_secret(self, key: str, provider_name: Optional[str] = None) -> Optional[str]:
-        """Get a secret from the specified provider or the default provider.
-        
-        Args:
-            key: The secret key to retrieve
-            provider_name: Optional provider name to use, defaults to the default provider
-            
-        Returns:
-            str or None: The secret value if found, None otherwise
-            
-        Raises:
-            ProviderNotFoundError: If the specified provider does not exist
-        """
-        provider = await self._get_provider(provider_name)
-        return await provider.get_secret(key)
-    
-    async def set_secret(self, key: str, value: str, provider_name: Optional[str] = None) -> bool:
-        """Set a secret in the specified provider or the default provider.
-        
-        Args:
-            key: The secret key to set
-            value: The secret value to store
-            provider_name: Optional provider name to use, defaults to the default provider
-            
-        Returns:
-            bool: True if the secret was stored successfully
-            
-        Raises:
-            ProviderNotFoundError: If the specified provider does not exist
-        """
-        provider = await self._get_provider(provider_name)
-        return await provider.set_secret(key, value)
-    
-    async def delete_secret(self, key: str, provider_name: Optional[str] = None) -> bool:
-        """Delete a secret from the specified provider or the default provider.
-        
-        Args:
-            key: The secret key to delete
-            provider_name: Optional provider name to use, defaults to the default provider
-            
-        Returns:
-            bool: True if the secret was deleted successfully
-            
-        Raises:
-            ProviderNotFoundError: If the specified provider does not exist
-        """
-        provider = await self._get_provider(provider_name)
-        return await provider.delete_secret(key)
-    
-    async def list_secrets(
+    def _ensure_initialized(self) -> None:
+        if not self._initialized or not self.active_provider or not self._session_factory:
+            raise SecretError("SecretManager is not properly initialized (provider or session factory missing).")
+
+    # --- SecretDefinition Metadata Operations (interacting with main DB) ---
+
+    async def define_secret_bundle(
         self, 
-        prefix: Optional[str] = None, 
-        provider_name: Optional[str] = None
-    ) -> Dict[str, str]:
-        """List secrets from the specified provider or the default provider.
+        project_name: str,
+        secret_name: str, 
+        description: Optional[str] = None
+    ) -> SecretDefinition:
+        self._ensure_initialized()
+        try:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    project_check_stmt = select(Project.name).where(Project.name == project_name) # Select name for check, as Project.id does not exist
+                    project_exists_result = await session.execute(project_check_stmt)
+                    if not project_exists_result.scalar_one_or_none():
+                        raise SecretNotFoundError(f"Project with name '{project_name}' not found.")
+
+                    new_definition = SecretDefinition(
+                        project_name=project_name,
+                        name=secret_name,
+                        description=description
+                    )
+                    session.add(new_definition)
+                    await session.flush() # Use flush to get potential IntegrityError before commit
+                    await session.refresh(new_definition) # Refresh after implicit commit by session.begin()
+                    logger.info(f"Defined secret bundle '{secret_name}' for project '{project_name}'.")
+                    return new_definition
+        except IntegrityError:
+            logger.warning(f"Attempt to define secret bundle '{secret_name}' for project '{project_name}' failed due to integrity constraint (e.g., already exists).")
+            raise SecretError(f"Secret bundle '{secret_name}' already defined for this project or other integrity issue.")
+        except SecretNotFoundError: 
+            raise
+        except Exception as e:
+            logger.error(f"Error defining secret bundle '{secret_name}' for project '{project_name}': {e}", exc_info=True)
+            raise SecretError(f"Could not define secret bundle: {e}")
+
+    async def get_secret_bundle_definition(
+        self, 
+        project_name: str,
+        secret_name: str
+    ) -> Optional[SecretDefinition]:
+        self._ensure_initialized()
+        async with self._session_factory() as session:
+            async with session.begin(): 
+                stmt = select(SecretDefinition).where(
+                    SecretDefinition.project_name == project_name,
+                    SecretDefinition.name == secret_name
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+
+    async def list_secret_bundle_definitions(self, project_name: str) -> List[SecretDefinition]:
+        self._ensure_initialized()
+        async with self._session_factory() as session:
+            async with session.begin():
+                stmt = select(SecretDefinition).where(SecretDefinition.project_name == project_name).order_by(SecretDefinition.name)
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+
+    async def delete_secret_bundle_definition(self, project_name: str, secret_name: str) -> bool:
+        """Deletes only the metadata. Values must be deleted separately if desired."""
+        self._ensure_initialized()
+        deleted_id = None
+        async with self._session_factory() as session:
+            async with session.begin():
+                stmt = delete(SecretDefinition).where(
+                    SecretDefinition.project_name == project_name,
+                    SecretDefinition.name == secret_name
+                ).returning(SecretDefinition.id)
+                result = await session.execute(stmt)
+                deleted_id = result.scalar_one_or_none()
+            
+        if deleted_id:
+            logger.info(f"Deleted secret bundle definition '{secret_name}' for project '{project_name}'.")
+            return True
+        logger.info(f"Secret bundle definition '{secret_name}' not found for project '{project_name}'. No action taken.")
+        return False
+
+    # --- Secret Value Operations (delegating to active_provider) ---
+
+    async def set_secret_values(
+        self, 
+        project_name: str, 
+        secret_name: str, 
+        values: Dict[str, str]
+    ) -> bool:
+        self._ensure_initialized()
+        definition = await self.get_secret_bundle_definition(project_name, secret_name)
+        if not definition or not definition.id:
+            raise SecretNotFoundError(f"Secret bundle definition '{secret_name}' not found for project '{project_name}'. Define it first.")
         
-        Args:
-            prefix: Optional prefix to filter keys
-            provider_name: Optional provider name to use, defaults to the default provider
-            
-        Returns:
-            dict: Dictionary of key-value pairs of secrets
-            
-        Raises:
-            ProviderNotFoundError: If the specified provider does not exist
-        """
-        provider = await self._get_provider(provider_name)
-        secrets = await provider.list_secrets(prefix)
-        return secrets
-    
-    async def check_secret_exists(self, key: str, provider_name: Optional[str] = None) -> bool:
-        """Check if a secret exists in the specified provider or the default provider.
+        return await self.active_provider.store_bundle(
+            secret_definition_id_str=str(definition.id),
+            secret_name_for_log=secret_name,
+            data=values
+        )
+
+    async def get_secret_values(self, project_name: str, secret_name: str) -> Optional[Dict[str, str]]:
+        self._ensure_initialized()
+        definition = await self.get_secret_bundle_definition(project_name, secret_name)
+        if not definition or not definition.id:
+            logger.info(f"Secret bundle definition '{secret_name}' not found for project '{project_name}'. Cannot get values.")
+            return None 
+        return await self.active_provider.retrieve_bundle(
+            secret_definition_id_str=str(definition.id),
+            secret_name_for_log=secret_name
+        )
+
+    async def delete_secret_values(self, project_name: str, secret_name: str) -> bool:
+        self._ensure_initialized()
+        definition = await self.get_secret_bundle_definition(project_name, secret_name)
+        if not definition or not definition.id:
+            logger.info(f"Secret bundle definition '{secret_name}' not found for project '{project_name}'. No values to delete.")
+            return True # Nothing to delete for the provider
+        return await self.active_provider.delete_bundle(
+            secret_definition_id_str=str(definition.id),
+            secret_name_for_log=secret_name
+        )
+
+    async def delete_entire_secret(self, project_name: str, secret_name: str) -> bool:
+        self._ensure_initialized()
+        logger.info(f"Attempting to delete entire secret '{secret_name}' for project '{project_name}'.")
         
-        Args:
-            key: The secret key to check
-            provider_name: Optional provider name to use, defaults to the default provider
-            
-        Returns:
-            bool: True if the secret exists
-            
-        Raises:
-            ProviderNotFoundError: If the specified provider does not exist
-        """
-        provider = await self._get_provider(provider_name)
-        return await provider.check_secret_exists(key)
-    
-    async def get_available_providers(self) -> List[str]:
-        """Get a list of available secret provider names.
+        definition = await self.get_secret_bundle_definition(project_name, secret_name)
+        values_deleted_successfully = True # Assume success if no definition to avoid provider call with no ID
+
+        if definition and definition.id:
+            values_deleted_successfully = await self.active_provider.delete_bundle(
+                secret_definition_id_str=str(definition.id),
+                secret_name_for_log=secret_name
+            )
+            if not values_deleted_successfully:
+                logger.error(f"Provider reported an issue deleting values for secret_definition_id '{definition.id}' (name '{secret_name}', project '{project_name}').")
+        else:
+            logger.info(f"Secret bundle definition '{secret_name}' not found for project '{project_name}'. No values to delete via provider.")
+
+        definition_deleted_successfully = await self.delete_secret_bundle_definition(project_name, secret_name)
         
-        Returns:
-            List[str]: List of provider names
-        """
+        if definition_deleted_successfully:
+            logger.info(f"Successfully deleted secret definition for '{secret_name}' in project '{project_name}'. Value deletion status: {values_deleted_successfully}")
+        else:
+             logger.info(f"Secret definition for '{secret_name}' in project '{project_name}' was not found or not deleted. Value deletion status: {values_deleted_successfully}")
+        return definition_deleted_successfully
+
+    async def get_available_provider_types(self) -> List[str]:
+        """Gets a list of registered secret provider plugin types."""
+        self._ensure_initialized() # or not, if this is purely from registry
         try:
             provider_classes = plugin_registry.get_plugin_classes(PluginType.SECRET_PROVIDER)
             return list(provider_classes.keys())
         except Exception as e:
-            logger.error(f"Error getting available providers: {str(e)}")
-            return ["file", "env", "db"]  # Return defaults as fallback
+            logger.error(f"Error getting available secret provider types: {e}")
+            return [] # Fallback
+            
+    def get_active_provider_type(self) -> Optional[str]:
+        self._ensure_initialized()
+        return self.active_provider_type
     
     async def shutdown(self) -> None:
-        """Shut down all provider instances."""
-        # Let the plugin registry handle plugin shutdown
-        if hasattr(plugin_registry, 'shutdown_all'):
-            await plugin_registry.shutdown_all()
+        if self.active_provider and hasattr(self.active_provider, 'shutdown'):
+            logger.info(f"Shutting down active secret provider: {self.active_provider_type}")
+            await self.active_provider.shutdown()
+        self._initialized = False
+        self.active_provider = None
+        self.active_provider_type = None
+        self._session_factory = None # Clear session factory
+        logger.info("SecretManager shut down.")
 
-    async def register_provider(
+    async def create_secret_bundle_with_values(
         self,
-        name: str,
-        provider: SecretProvider,
-        config: Dict[str, Any],
-        make_default: bool = False
-    ):
-        """Register a new provider with the manager.
-        
-        Args:
-            name: Name to register the provider under
-            provider: Provider instance
-            config: Provider configuration
-            make_default: Whether to make this the default provider
-            
-        Raises:
-            ProviderExistsError: If a provider with the same name already exists
+        project_name: str,
+        secret_name: str,
+        values: Dict[str, str],
+        description: Optional[str] = None
+    ) -> SecretDefinition:
+        """ 
+        Creates a secret bundle definition and stores its initial values.
+        If storing values fails after definition creation, attempts to roll back the definition.
         """
-        await self._ensure_initialized()
-        
-        # Store the provider and its configuration
-        if name in self._providers:
-            raise ProviderExistsError(f"Provider '{name}' already exists")
+        self._ensure_initialized()
+
+        definition: Optional[SecretDefinition] = None
+        try:
+            # 1. Define the secret bundle (metadata)
+            # This existing method handles DB session, project check, and IntegrityError for duplicates.
+            definition = await self.define_secret_bundle(
+                project_name=project_name,
+                secret_name=secret_name,
+                description=description
+            )
+        except SecretError as e: # Catch errors from define_secret_bundle (e.g. already exists, DB error)
+            logger.error(f"Failed to define secret bundle '{secret_name}' for project '{project_name}' during initial step of create_secret_bundle_with_values: {e}")
+            raise # Re-raise the original, more specific error
+        except Exception as e: # Catch any other unexpected error during definition
+            logger.error(f"Unexpected error defining secret bundle '{secret_name}' for project '{project_name}': {e}", exc_info=True)
+            raise SecretError(f"Unexpected error defining secret bundle '{secret_name}': {e}")
+
+        # Ensure definition was created and has an ID
+        if not definition or not definition.id:
+            # This case should ideally not be reached if define_secret_bundle works as expected (raises on failure)
+            logger.error(f"Secret definition for '{secret_name}' in project '{project_name}' was not properly created or lacks an ID before value storage.")
+            raise SecretError(f"Failed to obtain a valid secret definition for '{secret_name}'.")
+
+        # 2. Store the actual secret values using the provider
+        try:
+            success = await self.active_provider.store_bundle(
+                secret_definition_id_str=str(definition.id),
+                secret_name_for_log=secret_name,
+                data=values
+            )
+            if not success:
+                logger.error(f"Provider failed to store values for secret '{secret_name}' (definition ID: {definition.id}). Attempting to delete definition.")
+                try:
+                    await self.delete_secret_bundle_definition(project_name, secret_name)
+                    logger.info(f"Successfully rolled back (deleted) definition for '{secret_name}' after value storage failure.")
+                except Exception as del_e:
+                    logger.error(f"Failed to roll back (delete) definition for '{secret_name}' after value storage failure: {del_e}. Manual cleanup may be required.")
+                raise SecretError(f"Failed to store values for secret bundle '{secret_name}'. Provider reported failure. Definition rollback attempted.")
             
-        self._providers[name] = provider
-        self._config.setdefault("providers", {})[name] = config
-        
-        # Update the default provider if requested
-        if make_default:
-            self.default_provider = name
-            self._config["default_provider"] = name
+            logger.info(f"Successfully created secret bundle '{secret_name}' and stored its values for project '{project_name}'.")
+            return definition # Return the created definition
+
+        except Exception as e:
+            logger.error(f"Error storing values for secret '{secret_name}' (definition ID: {definition.id}): {e}. Attempting to delete definition.", exc_info=True)
+            try:
+                await self.delete_secret_bundle_definition(project_name, secret_name)
+                logger.info(f"Successfully rolled back (deleted) definition for '{secret_name}' after value storage error.")
+            except Exception as del_e:
+                logger.error(f"Failed to roll back (delete) definition for '{secret_name}' after value storage error: {del_e}. Manual cleanup may be required.")
             
-        logger.info(f"Registered secret provider '{name}'") 
+            if isinstance(e, SecretError): # If it's already a SecretError, re-raise it
+                raise
+            else: # Wrap other exceptions
+                raise SecretError(f"An error occurred while storing values for secret '{secret_name}': {e}") 

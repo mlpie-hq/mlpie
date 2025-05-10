@@ -5,10 +5,9 @@ This module provides database operations for projects.
 """
 
 import logging
-import uuid
 from typing import List, Optional, Dict, Any
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mlpie.db.models.project import Project, ProjectStatus
@@ -31,62 +30,46 @@ async def get_project_by_name(session: AsyncSession, name: str) -> Optional[Proj
     return result.scalars().first()
 
 
-async def get_project_by_id(session: AsyncSession, project_id: uuid.UUID) -> Optional[Project]:
+async def get_projects(
+    session: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[ProjectStatus] = None
+) -> List[Project]:
     """
-    Get a project by ID.
+    Get a list of projects.
     
     Args:
         session: Database session
-        project_id: Project ID
+        skip: Number of projects to skip
+        limit: Maximum number of projects to return
+        status: Filter by project status
         
     Returns:
-        Project instance or None if not found
+        List of project objects
     """
-    result = await session.execute(select(Project).where(Project.id == project_id))
-    return result.scalars().first()
-
-
-async def get_all_projects(session: AsyncSession) -> List[Project]:
-    """
-    Get all projects.
+    query = select(Project)
     
-    Args:
-        session: Database session
+    if status:
+        query = query.where(Project.status == status)
         
-    Returns:
-        List of Project instances
-    """
-    result = await session.execute(select(Project))
-    return result.scalars().all()
+    query = query.offset(skip).limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())
 
 
-async def get_active_projects(session: AsyncSession) -> List[Project]:
-    """
-    Get all active projects.
-    
-    Args:
-        session: Database session
-        
-    Returns:
-        List of active Project instances
-    """
-    result = await session.execute(
-        select(Project).where(Project.status == ProjectStatus.ACTIVE)
-    )
-    return result.scalars().all()
-
-
-async def create_project(session: AsyncSession, project: Project) -> Project:
+async def create_project(session: AsyncSession, project_data: Dict[str, Any]) -> Project:
     """
     Create a new project.
     
     Args:
         session: Database session
-        project: Project instance
+        project_data: Project data dictionary
         
     Returns:
-        Created Project instance
+        Created project object
     """
+    project = Project(**project_data)
     session.add(project)
     await session.commit()
     await session.refresh(project)
@@ -95,40 +78,39 @@ async def create_project(session: AsyncSession, project: Project) -> Project:
 
 async def update_project(session: AsyncSession, project: Project) -> Project:
     """
-    Update an existing project.
+    Update a project.
     
     Args:
         session: Database session
-        project: Project instance with updated values
+        project: Project object to update
         
     Returns:
-        Updated Project instance
+        Updated project object
     """
     await session.commit()
     await session.refresh(project)
     return project
 
 
-async def delete_project(session: AsyncSession, project_id: uuid.UUID) -> bool:
+async def delete_project(session: AsyncSession, name: str) -> bool:
     """
     Delete a project.
     
     Args:
         session: Database session
-        project_id: ID of the project to delete
+        name: Project name
         
     Returns:
         True if project was deleted, False if not found
     """
-    result = await session.execute(delete(Project).where(Project.id == project_id))
+    result = await session.execute(delete(Project).where(Project.name == name))
     await session.commit()
     return result.rowcount > 0
 
 
 async def reconcile_projects(
-    session: AsyncSession, 
-    scanned_projects: List[Project],
-    source_path_prefix: Optional[str] = None
+    session: AsyncSession,
+    scanned_projects: List[Project]
 ) -> Dict[str, int]:
     """
     Reconcile scanned projects with database state.
@@ -136,10 +118,9 @@ async def reconcile_projects(
     Args:
         session: Database session
         scanned_projects: List of projects from scanning
-        source_path_prefix: Optional prefix to add to source paths
         
     Returns:
-        Dictionary with counts of created/updated/deleted projects
+        Dictionary with counts of created/updated/unchanged projects
     """
     counters = {
         "created": 0,
@@ -160,24 +141,29 @@ async def reconcile_projects(
         
         if existing_project:
             # Update existing project
-            # We need to preserve ID and created_at
-            project_id = existing_project.id
+            # We need to preserve created_at
             created_at = existing_project.created_at
             
             # Update fields from new project
             existing_project.spec = project.spec
+            existing_project.description = project.description
             existing_project.repository_url = project.repository_url
             existing_project.branch = project.branch
-            existing_project.description = project.description
             existing_project.status = project.status
-            existing_project.source_path = project.source_path
             
             # Update in database
             await update_project(session, existing_project)
             counters["updated"] += 1
         else:
             # Create new project
-            await create_project(session, project)
+            await create_project(session, {
+                "name": project.name,
+                "spec": project.spec,
+                "description": project.description,
+                "repository_url": project.repository_url,
+                "branch": project.branch,
+                "status": project.status
+            })
             counters["created"] += 1
     
     # Optional: Mark projects not found in scan for cleanup

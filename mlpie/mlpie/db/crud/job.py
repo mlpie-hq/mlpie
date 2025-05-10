@@ -10,7 +10,6 @@ from uuid import UUID
 
 from sqlalchemy import select, update, delete, desc, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from mlpie.db.models.job import Job, JobStatus, JobType
 

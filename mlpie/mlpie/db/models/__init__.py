@@ -18,11 +18,22 @@ from mlpie.db.models.project import Project, ProjectStatus, AuthType
 from mlpie.db.models.dataset import Dataset
 from mlpie.db.models.pipeline import Pipeline
 from mlpie.db.models.environment import Environment
+from mlpie.db.models.secret_definition import SecretDefinition
+from mlpie.db.models.encrypted_secret_value import EncryptedSecretValue
 
 __all__ = [
+    "Base",
+    "Project",
+    "ProjectStatus",
+    "AuthType",
+    "Dataset",
+    "Pipeline",
+    "Environment",
     "Configuration",
     "ConfigValueType",
     "InstalledPlugin",
     "RepositoryState",
     "SyncStatus",
+    "SecretDefinition",
+    "EncryptedSecretValue",
 ] 

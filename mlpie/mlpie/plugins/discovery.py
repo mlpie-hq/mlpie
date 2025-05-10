@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 PLUGIN_ENTRY_POINT_GROUP = "mlpie.plugins"
 
 
-def discover_plugins_from_entry_points() -> List[Type[Plugin]]:
+def discover_external_plugins() -> List[Type[Plugin]]:
     """Discover plugins from entry points.
     
     This function looks for plugins registered using the entry_points mechanism
@@ -70,21 +70,25 @@ def discover_plugins_from_entry_points() -> List[Type[Plugin]]:
     return discovered_plugins
 
 
-def discover_module_providers() -> List[Type[Plugin]]:
+def discover_built_in_plugins() -> List[Type[Plugin]]:
     """Discover provider plugins in each module's providers directory.
+    
+    Args:
+        modules_with_providers: Optional list of module paths to scan for providers.
+                              If None, uses default modules list.
     
     Returns:
         List of discovered plugin classes
     """
     discovered_plugins: List[Type[Plugin]] = []
     
-    # Define modules that may contain providers
     modules_with_providers = [
-        "mlpie.secrets.providers", 
         "mlpie.db.providers",
-        "mlpie.gitops.providers",
-        "mlpie.storage.providers",
-        "mlpie.auth.providers",
+        "mlpie.profilers",
+        # "mlpie.secrets.providers", 
+        # "mlpie.gitops.providers",
+        # "mlpie.storage.providers",
+        # "mlpie.auth.providers",
         # Add more modules as they are created
     ]
     
@@ -118,10 +122,10 @@ def discover_all_plugins() -> Dict[PluginType, Dict[str, Type[Plugin]]]:
         Dictionary mapping plugin types to dictionaries of plugin names and classes
     """
     # Discover plugins from entry points
-    discover_plugins_from_entry_points()
+    discover_external_plugins()
     
     # Discover module provider plugins
-    discover_module_providers()
+    discover_built_in_plugins()
     
     # Return all registered plugins
     result = {}

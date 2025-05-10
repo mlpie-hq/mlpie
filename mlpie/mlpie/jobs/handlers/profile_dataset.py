@@ -1,18 +1,21 @@
 """
 Profile Dataset Job Handler.
 
-This module provides the handler for profiling dataset jobs.
+This module provides the job handler for profiling datasets.
 """
 
 import logging
 from typing import Any, Dict, Optional, Callable
 from uuid import UUID
 
-from mlpie.db.base import AsyncSessionLocal
-from mlpie.db.crud.environment import get_environment
-from mlpie.db.crud.dataset import get_dataset
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from mlpie.db.connection import get_session
+from mlpie.db.crud.environment import get_environment_by_id
+from mlpie.db.crud.dataset import get_dataset_by_id
 from mlpie.profilers.service import get_profiler_service
 from mlpie.profilers.config import ProfilerConfig
+from mlpie.db.models.job import Job
 
 
 logger = logging.getLogger(__name__)
@@ -49,11 +52,11 @@ async def handle_profile_dataset_job(
     profiler_service = get_profiler_service()
     
     # Create async session
-    async with AsyncSessionLocal() as session:
+    async with get_session() as session:
         # Get dataset if needed
         dataset = None
         if not config.get("path"):
-            dataset = await get_dataset(session, dataset_id)
+            dataset = await get_dataset_by_id(session, UUID(dataset_id))
             if not dataset:
                 error_msg = f"Dataset {dataset_id} not found"
                 if log_callback:
@@ -68,7 +71,7 @@ async def handle_profile_dataset_job(
             if log_callback:
                 await log_callback(f"Using environment {environment_id} for profiler configuration")
             
-            environment = await get_environment(session, environment_id)
+            environment = await get_environment_by_id(session, environment_id)
             if environment:
                 # Get profiler config from environment
                 profiler_config = environment.get_profiler_config(profiler_name)

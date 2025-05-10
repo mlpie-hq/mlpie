@@ -64,7 +64,7 @@ export default function JobsPage() {
       setLoading(true);
       
       // Construct query parameters based on filters
-      let url = '/api/jobs?';
+      let url = '/api/v1/jobs?';
       
       if (activeTab !== 'all') {
         url += `status=${activeTab}&`;

@@ -73,7 +73,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
   const fetchJob = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/jobs/${id}`);
+      const response = await fetch(`/api/v1/jobs/${id}`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch job details');
@@ -93,7 +93,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
   const fetchJobLogs = async () => {
     try {
       setLogsLoading(true);
-      const response = await fetch(`/api/jobs/${id}/logs`);
+      const response = await fetch(`/api/v1/jobs/${id}/logs`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch job logs');
@@ -110,7 +110,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
 
   const handleCancelJob = async () => {
     try {
-      const response = await fetch(`/api/jobs/${id}/cancel`, {
+      const response = await fetch(`/api/v1/jobs/${id}/cancel`, {
         method: 'POST',
       });
       

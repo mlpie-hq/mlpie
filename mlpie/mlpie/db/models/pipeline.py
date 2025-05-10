@@ -36,7 +36,7 @@ class Pipeline(Base):
     spec = Column(JSON, nullable=False, default={})
 
     # Project relationship (optional)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+    project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
     project = relationship("Project", back_populates="pipelines")
 
     # Timestamps
@@ -75,6 +75,6 @@ class Pipeline(Base):
             pipeline.labels = data["labels"]
         if "status" in data:
             pipeline.status = data["status"]
-        if "project_id" in data:
-            pipeline.project_id = data["project_id"]
+        if "project_name" in data:
+            pipeline.project_name = data["project_name"]
         return pipeline 
