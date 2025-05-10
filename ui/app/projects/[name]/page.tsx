@@ -66,7 +66,7 @@ type Project = {
 const initialProjects: Project[] = [
   {
     id: 1,
-    name: "Customer Churn Prediction",
+    name: "sample-ml-project",
     description: "Machine learning model to predict customer churn based on behavioral data and service usage patterns.",
     lastUpdated: "2 hours ago",
     status: "Active",
@@ -108,64 +108,6 @@ const initialProjects: Project[] = [
       }
     ]
   },
-  {
-    id: 2,
-    name: "GenAI Content Summarizer",
-    description: "Summarizing long articles using a fine-tuned large language model with configurable summary length.",
-    lastUpdated: "1 day ago",
-    status: "Active",
-    progress: 62,
-    models: 2,
-    datasets: [
-       { id: 'ds-101', name: 'Web Articles Corpus', recordCount: 50000, type: 'Source', lastUpdated: '1 week ago' },
-       { id: 'ds-102', name: 'Training Summaries', recordCount: 45000, type: 'Derived', lastUpdated: '4 days ago' },
-       { id: 'ds-103', name: 'Validation Set', recordCount: 5000, type: 'Derived', lastUpdated: '4 days ago' },
-       { id: 'ds-104', name: 'Fine-tuning Data', recordCount: 10000, type: 'Derived', lastUpdated: '3 days ago' },
-    ],
-    environments: [
-      { id: 'dev', name: 'Development', status: 'Synced', deployedVersion: 'v0.8.0', cluster: 'dev-cluster', lastDeployed: '30 mins ago' },
-      { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v0.7.5', cluster: 'prod-genai', lastDeployed: '3 days ago' },
-    ],
-    gitRepos: [],
-    secrets: []
-  },
-  {
-    id: 3,
-    name: "Image Classification Pipeline",
-    description: "End-to-end pipeline for training and deploying an image classifier with data augmentation and validation.",
-    lastUpdated: "3 days ago",
-    status: "Inactive",
-    progress: 32,
-    models: 1,
-    datasets: [
-      { id: 'ds-201', name: 'ImageNet Samples', recordCount: 100000, type: 'Source', lastUpdated: '1 month ago' },
-      { id: 'ds-202', name: 'Augmented Training Images', recordCount: 500000, type: 'Derived', lastUpdated: '1 week ago' },
-      { id: 'ds-203', name: 'Validation Images', recordCount: 10000, type: 'Derived', lastUpdated: '1 week ago' },
-    ],
-    environments: [],
-    gitRepos: [
-       { id: 'repo-3', name: 'Classifier Model', url: 'https://gitlab.com/my-research-group/image-classifier', branch: 'feature/new-augmentation', lastSync: '1 day ago', status: 'Error' },
-    ],
-    secrets: []
-  },
-   {
-    id: 4,
-    name: "Sentiment Analysis API",
-    description: "API endpoint for real-time sentiment analysis of customer feedback and social media mentions.",
-    lastUpdated: "1 week ago",
-    status: "Active",
-    progress: 90,
-    models: 1,
-    datasets: [
-       { id: 'ds-301', name: 'Customer Feedback DB', recordCount: 80000, type: 'Source', lastUpdated: '2 days ago' },
-       { id: 'ds-302', name: 'Cleaned Sentiment Data', recordCount: 75000, type: 'Derived', lastUpdated: '1 day ago' },
-    ],
-    environments: [
-       { id: 'prod', name: 'Production', status: 'Synced', deployedVersion: 'v2.0.0', cluster: 'prod-cluster-2', lastDeployed: '1 week ago' },
-    ],
-    gitRepos: [],
-    secrets: []
-  },
 ];
 
 // Helper to get status styles
@@ -200,14 +142,30 @@ const getDatasetTypeClasses = (type: string) => {
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  // Convert to numeric ID for mock data lookup, but keep string format for API calls
-  const projectId = params.id as string;
-  const numericProjectId = projectId ? parseInt(projectId, 10) : 0;
-  
+  // Use `params.name` which is the slug from the URL.
+  // The actual project name from `initialProjects` needs to be slugified for comparison.
+  const projectNameSlug = params.name as string;
+
+  // The `projectId` used for hooks like useProjectSecrets should now refer to the project's actual name or a unique identifier
+  // that the backend/service expects. If the backend expects the non-slugified name, we'd need to find it first.
+  // For now, assuming the hook might need the original name if the slug is just for routing.
+  // Let's find the project first, then decide what identifier useProjectSecrets needs.
+
   const { setSelectedProject, setSelectedEnvironment } = useProject();
   const [activeTab, setActiveTab] = useState('overview');
-  const initialProjectData = initialProjects.find(p => p.id === numericProjectId);
-  
+
+  // Find project by comparing slugified names
+  const initialProjectData = initialProjects.find(
+    p => p.name.toLowerCase().replace(/\s+/g, '-') === projectNameSlug
+  );
+
+  // Now, let's define what `projectIdForHooks` should be.
+  // If useProjectSecrets expects the actual name, use initialProjectData.name.
+  // If it expects the slug, use projectNameSlug.
+  // Based on the original code using `projectId || ''`, it implies it's a string identifier.
+  // Let's assume for now it can be the project's actual name.
+  const projectIdForHooks = initialProjectData ? initialProjectData.name : '';
+
   // --- State for Environments --- 
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);
@@ -229,8 +187,13 @@ export default function ProjectDetailPage() {
   const [isSecretModalOpen, setIsSecretModalOpen] = useState(false);
   const [currentSecretId, setCurrentSecretId] = useState<string | null>(null);
   const [secretName, setSecretName] = useState('');
+  const [secretDescription, setSecretDescription] = useState('');
   const [secretValues, setSecretValues] = useState<SecretKeyValue[]>([{ key: '', value: '' }]);
   const [showSecretValues, setShowSecretValues] = useState<Record<string, boolean>>({});
+
+  // CHANGED: fetchedSecretValues now stores Record<string, string> for each secret's values
+  const [fetchedSecretValues, setFetchedSecretValues] = useState<Record<string, Record<string, string>>>({});
+  const [isLoadingSecretValues, setIsLoadingSecretValues] = useState<Record<string, boolean>>({});
 
   // Use the project secrets hook
   const {
@@ -243,15 +206,10 @@ export default function ProjectDetailPage() {
     updateSecretValues,
     isUpdating,
     deleteSecret,
-    isDeleting
-  } = useProjectSecrets(projectId || '', {
+  } = useProjectSecrets(projectIdForHooks, {
     onSuccessCreate: () => handleCloseSecretModal(),
     onSuccessUpdate: () => handleCloseSecretModal(),
   });
-
-  // State to hold fetched secret values for viewing/editing, mapping secret name to its values
-  const [fetchedSecretValues, setFetchedSecretValues] = useState<Record<string, SecretKeyValue[]>>({});
-  const [isLoadingSecretValues, setIsLoadingSecretValues] = useState<Record<string, boolean>>({});
 
   // Effect to initialize states
   useEffect(() => {
@@ -400,19 +358,37 @@ export default function ProjectDetailPage() {
       if (definition) {
         setCurrentSecretId(definition.id);
         setSecretName(definition.name);
+        setSecretDescription(definition.description || '');
+        
+        // If values for this secret are not yet in fetchedSecretValues or are empty (object)
         if (!fetchedSecretValues[definition.name] || Object.keys(fetchedSecretValues[definition.name]).length === 0) {
           setIsLoadingSecretValues(prev => ({ ...prev, [definition.name]: true }));
           try {
-            const valuesData = await secretsService.getProjectSecretValues(projectId, definition.name);
-            setFetchedSecretValues(prev => ({ ...prev, [definition.name]: valuesData.values }));
-            setSecretValues(valuesData.values);
+            const response = await secretsService.getProjectSecretValues(projectNameSlug, definition.name);
+            if ('values' in response && typeof response.values === 'object' && response.values !== null) {
+              setFetchedSecretValues(prev => ({ ...prev, [definition.name]: response.values }));
+              // Transform Record<string, string> to SecretKeyValue[] for the form
+              const formArray = Object.entries(response.values).map(([k, v]) => ({ key: k, value: v }));
+              setSecretValues(formArray.length > 0 ? formArray : [{ key: '', value: '' }]);
+            } else if ('detail' in response) {
+              toast.info(response.detail || `No values found for ${definition.name} or they might be empty.`);
+              setFetchedSecretValues(prev => ({ ...prev, [definition.name]: {} })); // Store empty object
+              setSecretValues([{ key: '', value: '' }]);
+            } else {
+              toast.error(`Unexpected response when fetching values for ${definition.name}.`);
+              setFetchedSecretValues(prev => ({ ...prev, [definition.name]: {} }));
+              setSecretValues([{ key: '', value: '' }]);
+            }
           } catch (error) {
             toast.error(`Failed to fetch values for secret ${definition.name}: ${(error as Error).message}`);
+            setFetchedSecretValues(prev => ({ ...prev, [definition.name]: {} }));
             setSecretValues([{ key: '', value: '' }]);
           }
           setIsLoadingSecretValues(prev => ({ ...prev, [definition.name]: false }));
         } else {
-          setSecretValues(fetchedSecretValues[definition.name]);
+          // Values were already fetched, transform Record<string, string> to SecretKeyValue[] for the form
+          const formArray = Object.entries(fetchedSecretValues[definition.name]).map(([k, v]) => ({ key: k, value: v }));
+          setSecretValues(formArray.length > 0 ? formArray : [{ key: '', value: '' }]);
         }
       } else {
         toast.error("Secret definition not found.");
@@ -421,6 +397,7 @@ export default function ProjectDetailPage() {
     } else {
       setCurrentSecretId(null);
       setSecretName('');
+      setSecretDescription('');
       setSecretValues([{ key: '', value: '' }]);
     }
     setIsSecretModalOpen(true);
@@ -430,6 +407,7 @@ export default function ProjectDetailPage() {
     setIsSecretModalOpen(false);
     setCurrentSecretId(null);
     setSecretName('');
+    setSecretDescription('');
     setSecretValues([{ key: '', value: '' }]);
   };
 
@@ -458,9 +436,9 @@ export default function ProjectDetailPage() {
       toast.error("Secret name is required.");
       return;
     }
-    const hasEmptyFields = secretValues.some(kv => !kv.key); // Value can be empty string, but key must exist
-    if (hasEmptyFields) {
-      toast.error("All secret entries must have a key.");
+    const hasEmptyKeys = secretValues.some(kv => !kv.key);
+    if (hasEmptyKeys) {
+      toast.error("All secret entries must have a key name.");
       return;
     }
     const keys = secretValues.map(kv => kv.key);
@@ -469,20 +447,18 @@ export default function ProjectDetailPage() {
       return;
     }
 
-    if (currentSecretId) { // currentSecretId stores the UUID of the definition being edited
-      // Updating values of an existing secret
-      updateSecretValues({ secretName: secretName, values: secretValues });
+    if (currentSecretId) { 
+      updateSecretValues({ secretName: secretName, values: secretValues }); 
     } else {
-      // Creating new secret
       createSecret({
         secret_name: secretName,
-        values: secretValues,
-        description: '' // TODO: Add description field to modal if desired
+        values: secretValues, 
+        description: secretDescription
       });
     }
   };
 
-  const handleDeleteSecret = (secretNameToDelete: string) => { // Changed parameter from secretId to secretNameToDelete
+  const handleDeleteSecret = (secretNameToDelete: string) => {
     if (confirm("Are you sure you want to delete this secret? This action cannot be undone.")) {
       deleteSecret(secretNameToDelete);
     }
@@ -492,12 +468,19 @@ export default function ProjectDetailPage() {
     if (!showSecretValues[secretDefName] && (!fetchedSecretValues[secretDefName] || Object.keys(fetchedSecretValues[secretDefName]).length === 0)) {
       setIsLoadingSecretValues(prev => ({ ...prev, [secretDefName]: true }));
       try {
-        const valuesData = await secretsService.getProjectSecretValues(projectId, secretDefName);
-        setFetchedSecretValues(prev => ({ ...prev, [secretDefName]: valuesData.values }));
+        const response = await secretsService.getProjectSecretValues(projectNameSlug, secretDefName);
+        if ('values' in response && typeof response.values === 'object' && response.values !== null) {
+          setFetchedSecretValues(prev => ({ ...prev, [secretDefName]: response.values }));
+        } else if ('detail' in response) {
+          setFetchedSecretValues(prev => ({ ...prev, [secretDefName]: {} })); 
+          toast.info(response.detail || `No values found for ${secretDefName} or they might be empty.`);
+        } else {
+          setFetchedSecretValues(prev => ({ ...prev, [secretDefName]: {} }));
+          toast.error(`Unexpected response structure for ${secretDefName}.`);
+        }
       } catch (error) {
         toast.error(`Failed to fetch values for secret ${secretDefName}: ${(error as Error).message}`);
-        setIsLoadingSecretValues(prev => ({ ...prev, [secretDefName]: false }));
-        return;
+        setFetchedSecretValues(prev => ({ ...prev, [secretDefName]: {} }));
       }
       setIsLoadingSecretValues(prev => ({ ...prev, [secretDefName]: false }));
     }
@@ -513,7 +496,7 @@ export default function ProjectDetailPage() {
     return (
         <div className="p-6 text-center">
             <h1 className="text-xl text-red-600">Project Not Found</h1>
-            <p className="text-gray-500">Could not find project with ID: {projectId}</p>
+            <p className="text-gray-500">Could not find project with ID: {projectNameSlug}</p>
             <Link href="/" className="mt-4 inline-block text-blue-600 hover:text-blue-800">
                 Return to Projects
             </Link>
@@ -773,7 +756,7 @@ export default function ProjectDetailPage() {
                     environments.map((env: Environment, index: number) => (
                       <tr key={env.id} className={`border-t border-border ${index % 2 === 0 ? 'bg-card' : 'bg-secondary/20'}`}>
                         <td className="px-4 py-3 font-medium text-foreground">
-                          <Link href={`/projects/${params.id}/environments/${env.id}`} className="hover:text-primary hover:underline">
+                          <Link href={`/projects/${projectNameSlug}/environments/${env.id}`} className="hover:text-primary hover:underline">
                             {env.name}
                           </Link>
                         </td>
@@ -969,14 +952,14 @@ export default function ProjectDetailPage() {
                     {showSecretValues[secretDef.name] && fetchedSecretValues[secretDef.name] && (
                       <div className="mt-3 border-t border-gray-200 pt-3">
                         <dl className="space-y-2">
-                          {(fetchedSecretValues[secretDef.name] || []).map((kv: SecretKeyValue, kvIndex: number) => (
+                          {Object.entries(fetchedSecretValues[secretDef.name] || {}).map(([key, value], kvIndex) => (
                             <div key={kvIndex} className="grid grid-cols-3 gap-2 items-center">
-                              <dt className="text-sm font-medium text-gray-500 truncate col-span-1">{kv.key}</dt>
-                              <dd className="text-sm text-gray-900 col-span-2 break-all bg-gray-50 p-2 rounded">{kv.value}</dd>
+                              <dt className="text-sm font-medium text-gray-500 truncate col-span-1">{key}</dt>
+                              <dd className="text-sm text-gray-900 col-span-2 break-all bg-gray-50 p-2 rounded">{String(value)}</dd>
                             </div>
                           ))}
                         </dl>
-                        {(fetchedSecretValues[secretDef.name] || []).length === 0 && <p className='text-sm text-gray-500'>No key-value pairs defined.</p>}
+                        {Object.keys(fetchedSecretValues[secretDef.name] || {}).length === 0 && <p className='text-sm text-gray-500'>No key-value pairs defined.</p>}
                       </div>
                     )}
                     {showSecretValues[secretDef.name] && !fetchedSecretValues[secretDef.name] && !isLoadingSecretValues[secretDef.name] && (
@@ -1045,14 +1028,14 @@ export default function ProjectDetailPage() {
 kind: ProjectEnvironment
 metadata:
   name: ${envIdentifier}
-  namespace: project-${projectId} # Assuming namespace convention
+  namespace: project-${projectNameSlug} # Assuming namespace convention
 spec:
   displayName: "${name}"
   cluster: ${cluster}
   # Additional config like resource limits, node selectors can go here`;
 
     // CLI Example
-    const cli = `your-cli project env ${commandAction} --project ${projectId} \
+    const cli = `your-cli project env ${commandAction} --project ${projectNameSlug} \
     ${currentEnvironment ? `--env-id ${envIdentifier}` : ''} \
     --name "${name}" \
     --cluster "${cluster}" \
@@ -1062,7 +1045,7 @@ spec:
     const sdk = `from your_sdk import Client
 
 client = Client()
-project = client.get_project(${projectId})
+project = client.get_project(${projectNameSlug})
 
 environment = project.environments.${action}(
     ${currentEnvironment ? `id='${envIdentifier}',` : ''}
@@ -1110,14 +1093,14 @@ print(f"${currentEnvironment ? 'Updated' : 'Added'} environment: {environment.na
 kind: ProjectRepository
 metadata:
   name: ${repoIdentifier}
-  namespace: project-${projectId}
+  namespace: project-${projectNameSlug}
 spec:
   displayName: "${name || 'My Repository Link'}"
   url: ${safeUrl}
   # secretRef: optional-secret-name`;
 
     // CLI Example - Branch removed
-    const cli = `your-cli project repo link --project ${projectId} \ 
+    const cli = `your-cli project repo link --project ${projectNameSlug} \ 
     --name "${name || 'my-repo-link'}" \ 
     --url "${safeUrl}"`;
 
@@ -1126,7 +1109,7 @@ spec:
 
 client = Client()
 
-project = client.get_project(${projectId})
+project = client.get_project(${projectNameSlug})
 
 repo = project.link_repository(
     name="${name || 'my-repo-link'}",
@@ -1264,6 +1247,20 @@ print(f"Linked repository: {repo.name} ({repo.id})")`;
                         className="w-full p-2 border border-border rounded-md bg-secondary text-foreground text-sm"
                         placeholder="e.g., AWS Credentials, Database Connection"
                         required
+                        disabled={!!currentSecretId}
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-foreground mb-2">
+                        Description (Optional)
+                      </label>
+                      <textarea
+                        value={secretDescription}
+                        onChange={(e) => setSecretDescription(e.target.value)}
+                        className="w-full p-2 border border-border rounded-md bg-secondary text-foreground text-sm h-20 resize-none"
+                        placeholder="Briefly describe this secret bundle"
+                        disabled={!!currentSecretId}
                       />
                     </div>
                     
@@ -1297,7 +1294,7 @@ print(f"Linked repository: {repo.name} ({repo.id})")`;
                             </div>
                             <div className="flex-1">
                               <input
-                                type="text"
+                                type="password"
                                 value={kv.value}
                                 onChange={(e) => handleUpdateSecretKeyValue(index, 'value', e.target.value)}
                                 className="w-full p-2 border border-border rounded-md bg-secondary text-foreground text-sm mb-1"

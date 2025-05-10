@@ -10,8 +10,6 @@ import {
   secretsService,
   SecretKeyValue,
   SecretDefinition,
-  SecretCreatePayload,
-  SecretValuesUpdatePayload,
   SecretOperationResponse,
 } from "@/services/secretsService";
 
@@ -19,6 +17,13 @@ export interface UseProjectSecretsOptions {
   onSuccessCreate?: (data: SecretDefinition) => void;
   onSuccessUpdate?: (data: SecretOperationResponse) => void;
   onSuccessDelete?: (data: SecretOperationResponse) => void;
+}
+
+// Define the specific payload type for the createSecret hook mutation
+interface CreateSecretHookPayload {
+  secret_name: string;
+  values: SecretKeyValue[];
+  description?: string;
 }
 
 /**
@@ -44,9 +49,9 @@ export function useProjectSecrets(
   const createSecretMutation: UseMutationResult<
     SecretDefinition,
     Error,
-    SecretCreatePayload
+    CreateSecretHookPayload
   > = useMutation({
-    mutationFn: (payload) =>
+    mutationFn: (payload: CreateSecretHookPayload) =>
       secretsService.createProjectSecret(projectId, payload),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: secretsQueryKey });

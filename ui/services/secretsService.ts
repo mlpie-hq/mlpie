@@ -20,19 +20,20 @@ export interface SecretDefinition {
 // Payload for creating a new secret (definition + initial values)
 export interface SecretCreatePayload {
   secret_name: string;
-  values: SecretKeyValue[];
+  values: Record<string, string>;
   description?: string;
 }
 
 // Payload for updating the values of an existing secret
 export interface SecretValuesUpdatePayload {
-  values: SecretKeyValue[];
+  values: Record<string, string>;
 }
 
-// Represents the actual key-value pairs of a secret
-export interface SecretValues extends SecretValuesUpdatePayload {
+// Represents the actual key-value pairs of a secret from GET /values endpoint
+export interface SecretValues {
   project_name: string;
   secret_name: string;
+  values: Record<string, string>;
 }
 
 // Generic response for operations like update/delete
@@ -66,8 +67,8 @@ export const secretsService = {
   getProjectSecretValues: async (
     projectId: string,
     secretName: string
-  ): Promise<SecretValues> => {
-    return apiClient<SecretValues>(
+  ): Promise<SecretValues | { detail: string }> => {
+    return apiClient<SecretValues | { detail: string }>(
       `/api/v1/secrets/project/${projectId}/bundle/${secretName}/values`
     );
   },
@@ -75,12 +76,28 @@ export const secretsService = {
   // Create a new secret (definition and initial values) for a project
   createProjectSecret: async (
     projectId: string,
-    payload: SecretCreatePayload
+    payload: {
+      secret_name: string;
+      values: SecretKeyValue[];
+      description?: string;
+    }
   ): Promise<SecretDefinition> => {
-    // Returns the created SecretDefinition
+    const transformedValues: Record<string, string> = {};
+    for (const kv of payload.values) {
+      if (kv.key) {
+        transformedValues[kv.key] = kv.value;
+      }
+    }
+
+    const apiPayload: SecretCreatePayload = {
+      secret_name: payload.secret_name,
+      values: transformedValues,
+      description: payload.description,
+    };
+
     return apiClient<SecretDefinition>(`/api/v1/secrets/project/${projectId}`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(apiPayload),
     });
   },
 
@@ -88,13 +105,22 @@ export const secretsService = {
   updateProjectSecretValues: async (
     projectId: string,
     secretName: string,
-    payload: SecretValuesUpdatePayload
+    payload: { values: SecretKeyValue[] }
   ): Promise<SecretOperationResponse> => {
+    const transformedValues: Record<string, string> = {};
+    for (const kv of payload.values) {
+      if (kv.key) {
+        transformedValues[kv.key] = kv.value;
+      }
+    }
+    const apiPayload: SecretValuesUpdatePayload = {
+      values: transformedValues,
+    };
     return apiClient<SecretOperationResponse>(
       `/api/v1/secrets/project/${projectId}/bundle/${secretName}/values`,
       {
         method: "PUT",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(apiPayload),
       }
     );
   },
