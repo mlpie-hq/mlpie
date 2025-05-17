@@ -68,7 +68,32 @@ async def create_pipeline(session: AsyncSession, pipeline_data: Dict[str, Any]) 
         
     Returns:
         Created pipeline object
+        
+    Raises:
+        ValueError: If required fields are missing or if referenced entities don't exist
     """
+    # Validate required fields
+    if not pipeline_data.get("environment_name"):
+        raise ValueError("Environment reference (environment_name) is required for pipeline")
+        
+    # Import here to avoid circular imports
+    from mlpie.db.crud.environment import get_environment_by_name
+    from mlpie.db.crud.project import get_project_by_name
+    
+    # Verify that the referenced environment exists
+    environment_name = pipeline_data.get("environment_name")
+    environment = await get_environment_by_name(session, environment_name)
+    if not environment:
+        raise ValueError(f"Pipeline references non-existent environment '{environment_name}'")
+    
+    # Verify that the referenced project exists (if specified)
+    project_name = pipeline_data.get("project_name")
+    if project_name:
+        project = await get_project_by_name(session, project_name)
+        if not project:
+            raise ValueError(f"Pipeline references non-existent project '{project_name}'")
+    
+    # Create and save the pipeline
     pipeline = Pipeline(**pipeline_data)
     session.add(pipeline)
     await session.commit()
@@ -125,8 +150,13 @@ async def reconcile_pipelines(
     counters = {
         "created": 0,
         "updated": 0,
-        "unchanged": 0
+        "unchanged": 0,
+        "skipped": 0
     }
+    
+    # Import here to avoid circular imports
+    from mlpie.db.crud.environment import get_environment_by_name
+    from mlpie.db.crud.project import get_project_by_name
     
     # Track processed pipelines by name for potential cleanup
     processed_names = set()
@@ -135,6 +165,27 @@ async def reconcile_pipelines(
     for pipeline in scanned_pipelines:
         name = pipeline.name
         processed_names.add(name)
+        
+        # Validate required environment reference
+        if not pipeline.environment_name:
+            logger.error(f"Pipeline {name} is missing required environmentRef.name field - skipping")
+            counters["skipped"] += 1
+            continue
+            
+        # Verify that the referenced environment exists
+        environment = await get_environment_by_name(session, pipeline.environment_name)
+        if not environment:
+            logger.error(f"Pipeline {name} references non-existent environment '{pipeline.environment_name}' - skipping")
+            counters["skipped"] += 1
+            continue
+            
+        # Verify that the referenced project exists (if specified)
+        if pipeline.project_name:
+            project = await get_project_by_name(session, pipeline.project_name)
+            if not project:
+                logger.error(f"Pipeline {name} references non-existent project '{pipeline.project_name}' - skipping")
+                counters["skipped"] += 1
+                continue
         
         # Check if pipeline exists
         existing_pipeline = await get_pipeline_by_name(session, name)
@@ -153,6 +204,7 @@ async def reconcile_pipelines(
             existing_pipeline.labels = pipeline.labels
             existing_pipeline.active = pipeline.active
             existing_pipeline.project_name = pipeline.project_name
+            existing_pipeline.environment_name = pipeline.environment_name
             
             # Update in database
             await update_pipeline(session, existing_pipeline)
@@ -168,7 +220,8 @@ async def reconcile_pipelines(
                 "code": pipeline.code,
                 "labels": pipeline.labels,
                 "active": pipeline.active,
-                "project_name": pipeline.project_name
+                "project_name": pipeline.project_name,
+                "environment_name": pipeline.environment_name
             })
             counters["created"] += 1
     

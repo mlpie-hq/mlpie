@@ -1,11 +1,12 @@
 apiVersion: mlpie.ai/v1alpha1
 kind: Pipeline
 metadata:
-  name: etl
+  name: project2-prod-etl
 spec:
   description: "ETL Pipeline for Project 2 Prod"
   project: project2
   environment: prod
+  engine: "airflow"
   input:
     - dataset: customers
   output:

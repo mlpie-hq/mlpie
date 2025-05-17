@@ -39,6 +39,10 @@ class Pipeline(Base):
     project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
     project = relationship("Project", back_populates="pipelines")
     
+    # Environment relationship (required)
+    environment_name = Column(String(255), ForeignKey("environments.name"), nullable=False)
+    environment = relationship("Environment", back_populates="pipelines")
+    
     # Source repository information
     source_repository_url = Column(String(255), nullable=True)  # URL of the source repository
     source_repository_path = Column(String(255), nullable=True)  # Path within the repository
@@ -84,6 +88,8 @@ class Pipeline(Base):
             pipeline.status = data["status"]
         if "project_name" in data:
             pipeline.project_name = data["project_name"]
+        if "environment_name" in data:
+            pipeline.environment_name = data["environment_name"]
         if "source_path" in data:
             pipeline.source_path = data["source_path"]
         if "source_repository_url" in data:
@@ -125,6 +131,15 @@ class Pipeline(Base):
         if not engine:
             raise ValueError("Pipeline engine is required")
             
+        # Pre-validate environment field before creating the entity
+        # Only accept the K8s-style environment reference format
+        env_ref = spec.get("environmentRef")
+        if not (env_ref and isinstance(env_ref, dict) and env_ref.get("name")):
+            raise ValueError("Pipeline environmentRef.name is required and must use K8s-style format")
+            
+        # Extract environment name
+        environment_name = env_ref.get("name")
+            
         code = spec.get("code", "")
         
         # Create the pipeline with base fields
@@ -140,10 +155,11 @@ class Pipeline(Base):
             active=True,
             source_path=source_path,
             source_repository_url=source_repo_url,
-            source_repository_path=source_repo_path
+            source_repository_path=source_repo_path,
+            environment_name=environment_name  # Set environment name directly
         )
         
-        # Handle project reference if present
+        # Handle project reference if present - only accept K8s-style format
         project_ref = spec.get("projectRef")
         if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
             pipeline.project_name = project_ref.get("name")

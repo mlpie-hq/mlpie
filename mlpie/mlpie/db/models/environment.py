@@ -41,6 +41,12 @@ class Environment(Base):
     
     # Jobs relationship
     jobs = relationship("Job", back_populates="environment")
+    
+    # Pipeline relationship
+    pipelines = relationship("Pipeline", back_populates="environment")
+    
+    # Dataset relationship
+    datasets = relationship("Dataset", back_populates="environment")
 
     # Tags and categorization
     _labels = Column("labels", JSON, nullable=True, default=list)  # JSON array of labels/tags

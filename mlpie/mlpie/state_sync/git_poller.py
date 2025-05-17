@@ -49,10 +49,12 @@ async def poll_git_repository():
     It checks for any changes in the configured master Git repository and
     triggers necessary actions if changes are detected.
     """
+    logger.section("Master Git Repository Polling")
     logger.info("Starting master Git repository polling...")
     
     if not GIT_AVAILABLE:
         logger.error("GitPython library not available. Git operations cannot be performed.")
+        logger.end_section(success=False)
         return
     
     try:
@@ -60,6 +62,7 @@ async def poll_git_repository():
         config_manager = get_config_manager()
         if not config_manager:
             logger.warning("Config manager not available. Skipping Git polling.")
+            logger.end_section(success=False)
             return
             
         settings = config_manager.get_root_settings()
@@ -69,6 +72,7 @@ async def poll_git_repository():
         
         if not repo_url:
             logger.warning("Repository URL not configured. Skipping Git polling.")
+            logger.end_section(success=False)
             return
         
         # Get master repository (or create it)
@@ -108,8 +112,10 @@ async def poll_git_repository():
                 logger.exception("Error handling master repository", exc_info=e)
                 
         logger.info("Master Git repository polling completed.")
+        logger.end_section(success=True)
     except Exception as e:
         logger.exception("Error during master Git repository polling", exc_info=e)
+        logger.end_section(success=False)
 
 
 async def poll_single_repository(repository_id):
@@ -119,10 +125,12 @@ async def poll_single_repository(repository_id):
     Args:
         repository_id: UUID of the repository to poll
     """
+    logger.section(f"Repository Polling [{repository_id}]")
     logger.info(f"Polling repository {repository_id}...")
     
     if not GIT_AVAILABLE:
         logger.error("GitPython library not available. Git operations cannot be performed.")
+        logger.end_section(success=False)
         return
     
     try:
@@ -136,6 +144,7 @@ async def poll_single_repository(repository_id):
                 
                 if not repository:
                     logger.error(f"Repository with ID {repository_id} not found.")
+                    logger.end_section(success=False)
                     return
                 
                 # Update repository state to SYNCING
@@ -154,10 +163,12 @@ async def poll_single_repository(repository_id):
                 if not os.path.exists(os.path.join(repository.local_path, '.git')):
                     logger.info(f"Repository does not exist at {repository.local_path}. Will attempt to clone.")
                     
+                    logger.section("Repository Cloning")
                     # Clone repository
                     success, error_message = await repository_manager.clone_repository(repository)
                     
                     if success:
+                        logger.info(f"Repository successfully cloned to {repository.local_path}")
                         # If clone succeeded, get repository details
                         repo = Repo(repository.local_path)
                         current_sha = repo.head.commit.hexsha
@@ -179,9 +190,12 @@ async def poll_single_repository(repository_id):
                             is_local_repo_valid=True
                         )
                         
+                        logger.end_section(success=True)
+                        
                         # Process repository changes
                         await process_repository_changes(repository)
                     else:
+                        logger.error(f"Failed to clone repository: {error_message}")
                         # Update repository state with error
                         await update_repository_state(
                             session=session,
@@ -189,9 +203,11 @@ async def poll_single_repository(repository_id):
                             sync_status=SyncStatus.ERROR,
                             sync_error=error_message
                         )
+                        logger.end_section(success=False)
                 else:
                     logger.info(f"Repository exists at {repository.local_path}. Checking for updates.")
                     
+                    logger.section("Repository Updating")
                     # Pull changes from repository
                     was_pulled, error_message, current_sha, previous_sha = await repository_manager.pull_repository(repository)
                     
@@ -204,6 +220,7 @@ async def poll_single_repository(repository_id):
                     if was_pulled or is_first_run:
                         # Changes were pulled or this is first run
                         if current_sha:
+                            logger.info(f"Repository updated to commit {current_sha[:8]}")
                             # Get commit details
                             repo = Repo(repository.local_path)
                             commit = repo.commit(current_sha)
@@ -224,9 +241,12 @@ async def poll_single_repository(repository_id):
                                 is_local_repo_valid=True
                             )
                             
+                            logger.end_section(success=True)
+                            
                             # Process repository changes
                             await process_repository_changes(repository)
                         else:
+                            logger.error(f"Failed to update repository: {error_message or 'Unknown error'}")
                             # Update repository state with error
                             await update_repository_state(
                                 session=session,
@@ -234,6 +254,7 @@ async def poll_single_repository(repository_id):
                                 sync_status=SyncStatus.ERROR,
                                 sync_error=error_message or "Unknown error"
                             )
+                            logger.end_section(success=False)
                     else:
                         # No changes detected
                         logger.info(f"No changes detected in repository {repository.id}.")
@@ -244,6 +265,9 @@ async def poll_single_repository(repository_id):
                             repository_id=repository.id,
                             sync_status=SyncStatus.IDLE
                         )
+                        logger.end_section(success=True)
+                
+                logger.end_section(success=True)
             except Exception as e:
                 logger.exception(f"Error polling repository {repository_id}", exc_info=e)
                 
@@ -257,8 +281,11 @@ async def poll_single_repository(repository_id):
                     )
                 except Exception:
                     pass
+                
+                logger.end_section(success=False)
     except Exception as e:
         logger.exception(f"Error during repository polling", exc_info=e)
+        logger.end_section(success=False)
 
 
 async def process_repository_changes(repository: Repository):
@@ -268,6 +295,9 @@ async def process_repository_changes(repository: Repository):
     Args:
         repository: Repository object
     """
+    # Start a section for this repository processing
+    logger.section(f"Repository Processing [{repository.id}]")
+    
     try:
         logger.info(f"Processing changes in repository {repository.id}...")
         
@@ -275,6 +305,7 @@ async def process_repository_changes(repository: Repository):
         config_manager = get_config_manager()
         if not config_manager:
             logger.warning("Config manager not available. Skipping repository processing.")
+            logger.end_section(success=False)
             return
             
         settings = config_manager.get_root_settings()
@@ -332,6 +363,7 @@ async def process_repository_changes(repository: Repository):
                 
                 if not repo_state:
                     logger.warning(f"No state found for repository {repository.id}. Cannot determine previous SHA.")
+                    logger.end_section(success=False)
                     return
                     
                 # Get previous and current SHA
@@ -340,15 +372,34 @@ async def process_repository_changes(repository: Repository):
                 
                 # Scan for entities using each scanner
                 for entity_type, scanner in scanners.items():
-                    entities = await scanner.scan_repository(
+                    # Create a subsection for this entity type scan
+                    logger.section(f"Scanning {entity_type.capitalize()} Entities")
+                    
+                    # The scan_repository now returns a tuple of (entities, validation_errors)
+                    scan_result = await scanner.scan_repository(
+                        session=session,
                         previous_sha=previous_sha,
                         current_sha=current_sha
                     )
                     
+                    # Unpack the scan results
+                    entities, validation_errors = scan_result
+                    
+                    if validation_errors:
+                        error_count = len(validation_errors)
+                        logger.warning(f"Found {error_count} {entity_type} files with validation errors in repository {repository.id}")
+                        for file_path, errors in validation_errors.items():
+                            for error in errors:
+                                logger.warning(f"  - {file_path}: {error['message']}")
+                    
                     if not entities:
-                        logger.info(f"No {entity_type} entities found in repository {repository.id}.")
+                        if validation_errors:
+                            logger.info(f"No valid {entity_type} entities found in repository {repository.id} (found {len(validation_errors)} invalid files).")
+                        else:
+                            logger.info(f"No {entity_type} entities found in repository {repository.id}.")
+                        logger.end_section(success=True)  # Still consider it success if we just didn't find any entities
                     else:
-                        logger.info(f"Found {len(entities)} {entity_type} entities in repository {repository.id}.")
+                        logger.info(f"Found {len(entities)} valid {entity_type} entities in repository {repository.id}.")
                         
                         # Add source repository info to entities if they support it
                         for entity in entities:
@@ -357,14 +408,22 @@ async def process_repository_changes(repository: Repository):
                             if hasattr(entity, 'source_repository_path'):
                                 entity.source_repository_path = repository.path_in_repo
                         
-                        # Reconcile entities with database
-                        result = await scanner.reconcile_entities(session, entities)
+                        # Create a reconciliation subsection
+                        logger.section(f"Reconciling {entity_type.capitalize()} Entities")
+                        
+                        # Reconcile entities with database, passing validation errors
+                        result = await scanner.reconcile_entities(session, entities, validation_errors)
                         logger.info(f"{entity_type.capitalize()} reconciliation: {result}")
+                        
+                        logger.end_section(success=True)
                 
                 logger.info(f"Repository changes for {repository.id} processed successfully.")
+                logger.end_section(success=True)
                 
             except Exception as e:
                 logger.exception(f"Error during entity reconciliation", exc_info=e)
+                logger.end_section(success=False)
         
     except Exception as e:
-        logger.exception(f"Error processing repository changes", exc_info=e) 
+        logger.exception(f"Error processing repository changes", exc_info=e)
+        logger.end_section(success=False) 

@@ -1,12 +1,12 @@
 apiVersion: mlpie.ai/v1alpha1
 kind: Pipeline
 metadata:
-  name: project2-dev-etl
+  name: invalid-pipeline
 spec:
-  description: "ETL Pipeline for Project 2 Dev"
-  project: project2
+  description: "This pipeline is intentionally invalid (missing engine field)"
+  project: project1
   environment: dev
-  engine: "airflow"
+  # engine field is intentionally missing
   input:
     - dataset: customers
   output:

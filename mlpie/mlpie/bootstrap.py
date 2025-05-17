@@ -30,22 +30,31 @@ async def bootstrap_application(settings: RootSettings):
         bool: True if bootstrap was successful, False otherwise
     """
     success = True
+    
+    # Start the main bootstrap section
+    logger.section("Application Bootstrap")
+    
     try:
         # Initialize database
+        logger.section("Database Initialization")
         logger.info("Initializing database connection...")
         setup_database(settings)
+        logger.end_section()
 
         # Initialize scheduler
+        logger.section("Scheduler Initialization")
         logger.info("Initializing background scheduler...")
         await initialize_scheduler(settings)
+        logger.end_section()
 
         # Initialize plugins (discover and register)
-        logger.info("===== Initializing Plugins =====")
+        logger.section("Plugins Initialization")
         try:
             await initialize_plugins()
-            logger.info("Plugins initialized successfully")
+            logger.end_section(success=True)
         except Exception as e:
             logger.error(f"Failed to initialize plugins: {str(e)}", exc_info=True)
+            logger.end_section(success=False)
             success = False
             # If plugin initialization fails, we might not want to proceed
             # depending on how critical plugins are for basic operation.
@@ -54,27 +63,27 @@ async def bootstrap_application(settings: RootSettings):
         # THEN initialize secret manager (after ALL plugins are discovered and registered)
         # This is critical because the secret manager might depend on a plugin provider.
         if success: # Only attempt if previous steps (like plugin init) were okay
-            logger.info("===== Initializing secret manager =====")
+            logger.section("Secret Manager Initialization")
             try:
                 await setup_secret_manager()
-                logger.info("Secret manager initialized successfully")
+                logger.end_section(success=True)
             except Exception as e:
                 logger.error(f"Failed to initialize secret manager: {str(e)}", exc_info=True)
+                logger.end_section(success=False)
                 success = False
         else:
             logger.warning("Skipping secret manager initialization due to earlier bootstrap failures.")
 
         # Add other initialization steps here as needed
 
-        if success:
-            logger.info("Application bootstrap completed successfully")
-        else:
-            logger.error("Application bootstrap failed")
+        # End the main bootstrap section
+        logger.end_section(success=success)
 
         return success
 
     except Exception as e:
         logger.error(f"Critical error during application bootstrap: {str(e)}", exc_info=True)
+        logger.end_section(success=False)
         # If scheduler initialization fails, it logs the error internally
         # We still return False here as bootstrap failed
         return False

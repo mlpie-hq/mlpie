@@ -6,6 +6,7 @@ spec:
   description: "ETL Pipeline for Project 1 Dev"
   project: project1
   environment: dev
+  engine: "airflow"
   input:
     - dataset: customers
   output:

@@ -131,7 +131,32 @@ async def create_dataset(session: AsyncSession, dataset_data: Dict[str, Any]) ->
         
     Returns:
         Created dataset object
+        
+    Raises:
+        ValueError: If required fields are missing or if referenced entities don't exist
     """
+    # Validate required fields
+    if not dataset_data.get("environment_name"):
+        raise ValueError("Environment reference (environment_name) is required for dataset")
+        
+    # Import here to avoid circular imports
+    from mlpie.db.crud.environment import get_environment_by_name
+    from mlpie.db.crud.project import get_project_by_name
+    
+    # Verify that the referenced environment exists
+    environment_name = dataset_data.get("environment_name")
+    environment = await get_environment_by_name(session, environment_name)
+    if not environment:
+        raise ValueError(f"Dataset references non-existent environment '{environment_name}'")
+    
+    # Verify that the referenced project exists (if specified)
+    project_name = dataset_data.get("project_name")
+    if project_name:
+        project = await get_project_by_name(session, project_name)
+        if not project:
+            raise ValueError(f"Dataset references non-existent project '{project_name}'")
+    
+    # Create and save the dataset
     dataset = Dataset(**dataset_data)
     session.add(dataset)
     await session.commit()
@@ -188,8 +213,13 @@ async def reconcile_datasets(
     counters = {
         "created": 0,
         "updated": 0,
-        "unchanged": 0
+        "unchanged": 0,
+        "skipped": 0
     }
+    
+    # Import here to avoid circular imports
+    from mlpie.db.crud.environment import get_environment_by_name
+    from mlpie.db.crud.project import get_project_by_name
     
     # Track processed datasets by name for potential cleanup
     processed_names = set()
@@ -198,6 +228,27 @@ async def reconcile_datasets(
     for dataset in scanned_datasets:
         name = dataset.name
         processed_names.add(name)
+        
+        # Validate required environment reference
+        if not dataset.environment_name:
+            logger.error(f"Dataset {name} is missing required environmentRef.name field - skipping")
+            counters["skipped"] += 1
+            continue
+            
+        # Verify that the referenced environment exists
+        environment = await get_environment_by_name(session, dataset.environment_name)
+        if not environment:
+            logger.error(f"Dataset {name} references non-existent environment '{dataset.environment_name}' - skipping")
+            counters["skipped"] += 1
+            continue
+            
+        # Verify that the referenced project exists (if specified)
+        if dataset.project_name:
+            project = await get_project_by_name(session, dataset.project_name)
+            if not project:
+                logger.error(f"Dataset {name} references non-existent project '{dataset.project_name}' - skipping")
+                counters["skipped"] += 1
+                continue
         
         # Check if dataset exists
         existing_dataset = await get_dataset_by_name(session, name)
@@ -241,6 +292,10 @@ async def reconcile_datasets(
                 
             if existing_dataset.project_name != dataset.project_name:
                 existing_dataset.project_name = dataset.project_name
+                needs_update = True
+                
+            if existing_dataset.environment_name != dataset.environment_name:
+                existing_dataset.environment_name = dataset.environment_name
                 needs_update = True
                 
             if existing_dataset.labels != dataset.labels:
@@ -289,6 +344,7 @@ async def reconcile_datasets(
                 "database": dataset.database,
                 "active": dataset.active,
                 "project_name": dataset.project_name,
+                "environment_name": dataset.environment_name,
                 "labels": dataset.labels,
                 "credentials_secret_name": dataset.credentials_secret_name,
                 "credentials_username_key": dataset.credentials_username_key,
