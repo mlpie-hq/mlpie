@@ -65,6 +65,10 @@ class Dataset(Base):
     project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
     project = relationship("Project", back_populates="datasets")
     
+    # Source repository information
+    source_repository_url = Column(String(255), nullable=True)  # URL of the source repository
+    source_repository_path = Column(String(255), nullable=True)  # Path within the repository
+    
     # Jobs relationship
     jobs = relationship("Job", back_populates="dataset")
     
@@ -76,6 +80,9 @@ class Dataset(Base):
     # Status
     active = Column(Boolean, default=True)
     status = Column(String(50), default="Ready", nullable=False)
+
+    # File tracking
+    source_path = Column(String(255), nullable=True)  # Path to the source YAML file
 
     @property
     def labels(self) -> List[str]:
@@ -137,6 +144,15 @@ class Dataset(Base):
         if "project_name" in data:
             dataset.project_name = data["project_name"]
         
+        if "source_path" in data:
+            dataset.source_path = data["source_path"]
+            
+        if "source_repository_url" in data:
+            dataset.source_repository_url = data["source_repository_url"]
+            
+        if "source_repository_path" in data:
+            dataset.source_repository_path = data["source_repository_path"]
+            
         # Add profiling options if present
         if "profiler_name" in data:
             dataset.profiler_name = data["profiler_name"]
@@ -146,5 +162,82 @@ class Dataset(Base):
             
         if "profile_config" in data:
             dataset.profile_config = data["profile_config"]
+            
+        return dataset
+        
+    @classmethod
+    def from_yaml_spec(cls, spec_dict: Dict[str, Any], source_path: Optional[str] = None, 
+                       source_repo_url: Optional[str] = None, 
+                       source_repo_path: Optional[str] = None) -> 'Dataset':
+        """
+        Create a Dataset instance from a YAML specification dictionary.
+        
+        Args:
+            spec_dict: The parsed YAML dictionary
+            source_path: Path to the source YAML file
+            source_repo_url: URL of the source repository
+            source_repo_path: Path within the repository
+            
+        Returns:
+            Dataset: A new Dataset instance
+            
+        Raises:
+            ValueError: If required fields are missing
+        """
+        # Extract core fields from spec
+        metadata = spec_dict.get("metadata", {})
+        spec = spec_dict.get("spec", {})
+        
+        # Get name from either root level or metadata
+        name = spec_dict.get("name") or metadata.get("name")
+        if not name:
+            raise ValueError("Dataset name is required")
+            
+        # Determine format
+        format_value = spec.get("format")
+        if not format_value:
+            raise ValueError("Dataset format is required")
+            
+        # Create the dataset with base fields
+        dataset = cls(
+            name=name,
+            description=metadata.get("description"),
+            version=metadata.get("version"),
+            format=format_value,
+            spec=spec_dict,  # Store the entire spec
+            labels=metadata.get("labels"),
+            status="Ready",
+            active=True,
+            source_path=source_path,
+            source_repository_url=source_repo_url,
+            source_repository_path=source_repo_path
+        )
+        
+        # Handle project reference if present
+        project_ref = spec.get("projectRef")
+        if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+            dataset.project_name = project_ref.get("name")
+            
+        # Handle source information if present
+        source = spec.get("source", {})
+        if source:
+            dataset.source_type = source.get("type")
+            dataset.host = source.get("host")
+            dataset.port = source.get("port")
+            dataset.database = source.get("database")
+            
+            # Handle credentials if present
+            creds = source.get("credentials", {})
+            if creds:
+                dataset.credentials_secret_name = creds.get("secretName")
+                dataset.credentials_username_key = creds.get("usernameKey")
+                dataset.credentials_password_key = creds.get("passwordKey")
+                
+        # Handle profiling configuration if present
+        profiling = spec.get("profiling", {})
+        if profiling:
+            dataset.profiler_name = profiling.get("profiler")
+            dataset.auto_profile = profiling.get("autoProfile", False)
+            dataset.profile_config = profiling.get("config", {})
             
         return dataset 

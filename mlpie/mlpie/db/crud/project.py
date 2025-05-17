@@ -139,31 +139,55 @@ async def reconcile_projects(
         # Check if project exists
         existing_project = await get_project_by_name(session, name)
         
+        # Create dictionary of project data
+        project_data = {
+            "name": project.name,
+            "spec": project.spec,
+            "description": project.description,
+            "status": project.status
+        }
+        
+        # Add repository URL and path if available
+        if hasattr(project, 'source_repository_url'):
+            project_data["source_repository_url"] = project.source_repository_url
+        
+        if hasattr(project, 'source_repository_path'):
+            project_data["source_repository_path"] = project.source_repository_path
+        
         if existing_project:
-            # Update existing project
-            # We need to preserve created_at
-            created_at = existing_project.created_at
+            # Check if anything actually changed before updating
+            needs_update = False
             
-            # Update fields from new project
-            existing_project.spec = project.spec
-            existing_project.description = project.description
-            existing_project.repository_url = project.repository_url
-            existing_project.branch = project.branch
-            existing_project.status = project.status
-            
-            # Update in database
-            await update_project(session, existing_project)
-            counters["updated"] += 1
+            # Compare fields
+            if existing_project.spec != project.spec:
+                existing_project.spec = project.spec
+                needs_update = True
+                
+            if existing_project.description != project.description:
+                existing_project.description = project.description
+                needs_update = True
+                
+            if hasattr(project, 'source_repository_url') and existing_project.source_repository_url != project.source_repository_url:
+                existing_project.source_repository_url = project.source_repository_url
+                needs_update = True
+                
+            if hasattr(project, 'source_repository_path') and existing_project.source_repository_path != project.source_repository_path:
+                existing_project.source_repository_path = project.source_repository_path
+                needs_update = True
+                
+            if existing_project.status != project.status:
+                existing_project.status = project.status
+                needs_update = True
+                
+            # Only update if something changed
+            if needs_update:
+                await update_project(session, existing_project)
+                counters["updated"] += 1
+            else:
+                counters["unchanged"] += 1
         else:
             # Create new project
-            await create_project(session, {
-                "name": project.name,
-                "spec": project.spec,
-                "description": project.description,
-                "repository_url": project.repository_url,
-                "branch": project.branch,
-                "status": project.status
-            })
+            await create_project(session, project_data)
             counters["created"] += 1
     
     # Optional: Mark projects not found in scan for cleanup

@@ -1,0 +1,14 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Environment
+metadata:
+  name: dev
+spec:
+  project: project1
+  description: "Development Environment for Project 1"
+  # Specify repository for resources
+  resources:
+    repository:
+      url: "https://github.com/mlpie/project1-dev-resources.git"
+      ref: "main"
+      auth_type: "none"
+      resource_types: ["dataset", "pipeline"]  # This repo contains both datasets and pipelines 

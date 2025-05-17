@@ -1,0 +1,14 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Environment
+metadata:
+  name: prod
+spec:
+  project: project2
+  description: "Production Environment for Project 2"
+  # Specify repository for resources
+  resources:
+    repository:
+      url: "https://github.com/mlpie/project2-prod-resources.git"
+      ref: "main"
+      auth_type: "none"
+      resource_types: ["dataset", "pipeline"]  # This repo contains both datasets and pipelines 

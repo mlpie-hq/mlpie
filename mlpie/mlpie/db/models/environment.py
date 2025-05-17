@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from mlpie.db.base import Base
+from mlpie.db.models.repository import EntityType, Repository
 from mlpie.profilers.config import (
     ProfilerConfig,
     get_profiler_config_from_environment,
@@ -44,6 +45,15 @@ class Environment(Base):
     # Tags and categorization
     _labels = Column("labels", JSON, nullable=True, default=list)  # JSON array of labels/tags
 
+    # Repository relationships
+    repositories = relationship(
+        "Repository", 
+        primaryjoin="and_(Repository.entity_type=='environment', Repository.entity_id==Environment.id)",
+        cascade="all, delete-orphan",
+        foreign_keys="[Repository.entity_id]",
+        backref="environment_owner"
+    )
+
     # Timestamps
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
@@ -65,6 +75,10 @@ class Environment(Base):
 
     def __repr__(self):
         return f"<Environment(name='{self.name}', status='{self.status}')>"
+        
+    def get_repositories_for_resource_type(self, resource_type: str) -> List[Repository]:
+        """Get repositories that manage a specific resource type."""
+        return [repo for repo in self.repositories if repo.manages_resource_type(resource_type)]
 
     def get_profiler_config(self, profiler_name: Optional[str] = None) -> Optional[ProfilerConfig]:
         """
@@ -136,5 +150,28 @@ class Environment(Base):
         project_ref = spec.get("projectRef")
         if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
             environment.project_name = project_ref.get("name")
+        
+        # Handle repositories
+        repo_spec = spec.get("repository")
+        if repo_spec and isinstance(repo_spec, dict):
+            # Single repository definition
+            repo = Repository.from_spec_dict(
+                repo_spec, 
+                entity_type=EntityType.ENVIRONMENT.value, 
+                entity_id=str(environment.id)
+            )
+            environment.repositories.append(repo)
+        
+        # Handle multiple repositories
+        repositories = spec.get("repositories", [])
+        if repositories and isinstance(repositories, list):
+            for repo_spec in repositories:
+                if isinstance(repo_spec, dict):
+                    repo = Repository.from_spec_dict(
+                        repo_spec, 
+                        entity_type=EntityType.ENVIRONMENT.value, 
+                        entity_id=str(environment.id)
+                    )
+                    environment.repositories.append(repo)
             
         return environment 

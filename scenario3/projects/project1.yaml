@@ -1,0 +1,12 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Project
+metadata:
+  name: project1
+spec:
+  description: "Example Project 1"
+  # Specify repository for environments
+  environments:
+    repository:
+      url: "https://github.com/mlpie/project1-environments.git"
+      ref: "main"
+      auth_type: "none" 

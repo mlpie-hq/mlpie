@@ -1,0 +1,12 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Dataset
+metadata:
+  name: customers
+spec:
+  description: "Customer data for Project 2 Dev"
+  project: project2
+  environment: dev
+  format: csv
+  source:
+    type: file
+    path: "/data/p2-dev-customers.csv" 

@@ -203,31 +203,82 @@ async def reconcile_datasets(
         existing_dataset = await get_dataset_by_name(session, name)
         
         if existing_dataset:
-            # Update existing dataset
-            # We need to preserve created_at
-            created_at = existing_dataset.created_at
+            # Check if anything actually changed before updating
+            needs_update = False
             
-            # Update fields from new dataset
-            existing_dataset.spec = dataset.spec
-            existing_dataset.description = dataset.description
-            existing_dataset.format = dataset.format
-            existing_dataset.source_type = dataset.source_type
-            existing_dataset.host = dataset.host
-            existing_dataset.port = dataset.port
-            existing_dataset.database = dataset.database
-            existing_dataset.active = dataset.active
-            existing_dataset.project_name = dataset.project_name
-            existing_dataset.labels = dataset.labels
-            existing_dataset.credentials_secret_name = dataset.credentials_secret_name
-            existing_dataset.credentials_username_key = dataset.credentials_username_key
-            existing_dataset.credentials_password_key = dataset.credentials_password_key
-            
-            # Update in database
-            await update_dataset(session, existing_dataset)
-            counters["updated"] += 1
+            # Compare fields
+            if existing_dataset.spec != dataset.spec:
+                existing_dataset.spec = dataset.spec
+                needs_update = True
+                
+            if existing_dataset.description != dataset.description:
+                existing_dataset.description = dataset.description
+                needs_update = True
+                
+            if existing_dataset.format != dataset.format:
+                existing_dataset.format = dataset.format
+                needs_update = True
+                
+            if existing_dataset.source_type != dataset.source_type:
+                existing_dataset.source_type = dataset.source_type
+                needs_update = True
+                
+            if existing_dataset.host != dataset.host:
+                existing_dataset.host = dataset.host
+                needs_update = True
+                
+            if existing_dataset.port != dataset.port:
+                existing_dataset.port = dataset.port
+                needs_update = True
+                
+            if existing_dataset.database != dataset.database:
+                existing_dataset.database = dataset.database
+                needs_update = True
+                
+            if existing_dataset.active != dataset.active:
+                existing_dataset.active = dataset.active
+                needs_update = True
+                
+            if existing_dataset.project_name != dataset.project_name:
+                existing_dataset.project_name = dataset.project_name
+                needs_update = True
+                
+            if existing_dataset.labels != dataset.labels:
+                existing_dataset.labels = dataset.labels
+                needs_update = True
+                
+            if existing_dataset.credentials_secret_name != dataset.credentials_secret_name:
+                existing_dataset.credentials_secret_name = dataset.credentials_secret_name
+                needs_update = True
+                
+            if existing_dataset.credentials_username_key != dataset.credentials_username_key:
+                existing_dataset.credentials_username_key = dataset.credentials_username_key
+                needs_update = True
+                
+            if existing_dataset.credentials_password_key != dataset.credentials_password_key:
+                existing_dataset.credentials_password_key = dataset.credentials_password_key
+                needs_update = True
+                
+            # Update repository source info if available
+            if hasattr(dataset, 'source_repository_url') and hasattr(existing_dataset, 'source_repository_url'):
+                if existing_dataset.source_repository_url != dataset.source_repository_url:
+                    existing_dataset.source_repository_url = dataset.source_repository_url
+                    needs_update = True
+                    
+            if hasattr(dataset, 'source_repository_path') and hasattr(existing_dataset, 'source_repository_path'):
+                if existing_dataset.source_repository_path != dataset.source_repository_path:
+                    existing_dataset.source_repository_path = dataset.source_repository_path
+                    needs_update = True
+                
+            # Only update if something changed
+            if needs_update:
+                await update_dataset(session, existing_dataset)
+                counters["updated"] += 1
+            else:
+                counters["unchanged"] += 1
         else:
             # Create new dataset
-            await create_dataset(session, {
+            dataset_data = {
                 "name": dataset.name,
                 "spec": dataset.spec,
                 "description": dataset.description,
@@ -242,7 +293,16 @@ async def reconcile_datasets(
                 "credentials_secret_name": dataset.credentials_secret_name,
                 "credentials_username_key": dataset.credentials_username_key,
                 "credentials_password_key": dataset.credentials_password_key
-            })
+            }
+            
+            # Add source repository info if available
+            if hasattr(dataset, 'source_repository_url'):
+                dataset_data["source_repository_url"] = dataset.source_repository_url
+                
+            if hasattr(dataset, 'source_repository_path'):
+                dataset_data["source_repository_path"] = dataset.source_repository_path
+                
+            await create_dataset(session, dataset_data)
             counters["created"] += 1
     
     # Optional: Mark datasets not found in scan for cleanup

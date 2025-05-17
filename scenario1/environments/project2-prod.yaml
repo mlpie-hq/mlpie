@@ -1,0 +1,8 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Environment
+metadata:
+  name: prod
+spec:
+  project: project2
+  description: "Production Environment for Project 2"
+  # No repository specified for resources - will look in master repo 

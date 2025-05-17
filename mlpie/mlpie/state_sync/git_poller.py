@@ -9,6 +9,8 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime, UTC
+from uuid import UUID
+from typing import Dict, Any, Union
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +32,24 @@ except ImportError:
 # Import database session and CRUD operations
 from mlpie.db.connection import get_session
 from mlpie.db.crud.repository import (
-    get_or_create_repository_state, update_after_git_pull, set_sync_status
+    get_repository, get_repository_state, create_repository_state, update_repository_state
 )
-from mlpie.db.models.repository import SyncStatus
+from mlpie.db.models.repository import Repository, SyncStatus, EntityType
 from mlpie.state_sync.entity_scanner import ProjectScanner, DatasetScanner, PipelineScanner, EnvironmentScanner
+from mlpie.gitops.repository_manager import get_repository_manager
+from sqlalchemy import text, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def poll_git_repository():
     """
-    Polls the Git repository for changes.
+    Polls the master Git repository for changes.
     
     This function is called on a regular interval by the scheduler.
-    It checks for any changes in the configured Git repository and
+    It checks for any changes in the configured master Git repository and
     triggers necessary actions if changes are detected.
     """
-    logger.info("Starting Git repository polling...")
+    logger.info("Starting master Git repository polling...")
     
     if not GIT_AVAILABLE:
         logger.error("GitPython library not available. Git operations cannot be performed.")
@@ -60,49 +65,101 @@ async def poll_git_repository():
         settings = config_manager.get_root_settings()
         
         # Get configuration values
-        repo_path = settings.REPOSITORY_CLONE_PATH if hasattr(settings, 'REPOSITORY_CLONE_PATH') else None
-        if not repo_path:
-            # Fallback to old setting if new one is not available
-            repo_path = settings.REPOSITORY_PATH if hasattr(settings, 'REPOSITORY_PATH') else None
-            
         repo_url = settings.git.REPO_URL if hasattr(settings, 'git') and hasattr(settings.git, 'REPO_URL') else None
         
-        if not repo_path:
-            logger.warning("Repository path not configured. Skipping Git polling.")
-            return
-            
         if not repo_url:
             logger.warning("Repository URL not configured. Skipping Git polling.")
             return
         
-        # Convert to absolute path if it's relative
-        repo_path = os.path.abspath(repo_path)
-        logger.info(f"Polling Git repository at: {repo_path}")
-        
-        changes_detected = False
-        error_message = None
-        
-        # Get database session
+        # Get master repository (or create it)
         async for session in get_session():
             try:
-                # Initialize or get repository state
-                await set_sync_status(session, repo_url, SyncStatus.SYNCING)
+                # Query for master repository using SQLAlchemy's select instead of raw SQL
+                result = await session.execute(
+                    select(Repository).where(Repository.entity_type == EntityType.MASTER.value)
+                )
+                master_repo = result.scalars().first()
                 
-                # Create initial repository state if it doesn't exist
-                repo_state = await get_or_create_repository_state(
+                if master_repo:
+                    # Use the existing Repository object directly
+                    await poll_single_repository(master_repo.id)
+                else:
+                    logger.warning("No master repository found in database. Creating one from settings.")
+                    
+                    # Create a master repository from settings
+                    master_repo = Repository(
+                        entity_type=EntityType.MASTER.value,
+                        entity_id="master",
+                        url=repo_url,
+                        ref=getattr(settings.git, 'REPO_BRANCH', 'main'),
+                        name="Master Repository",
+                        auth_type=getattr(settings.git, 'AUTH_TYPE', 'none').lower(),
+                        resource_types=["*"]  # Master repo covers all resource types
+                    )
+                    
+                    # Add to database
+                    session.add(master_repo)
+                    await session.commit()
+                    await session.refresh(master_repo)
+                    
+                    # Poll this repository
+                    await poll_single_repository(master_repo.id)
+            except Exception as e:
+                logger.exception("Error handling master repository", exc_info=e)
+                
+        logger.info("Master Git repository polling completed.")
+    except Exception as e:
+        logger.exception("Error during master Git repository polling", exc_info=e)
+
+
+async def poll_single_repository(repository_id):
+    """
+    Poll a specific repository for changes.
+    
+    Args:
+        repository_id: UUID of the repository to poll
+    """
+    logger.info(f"Polling repository {repository_id}...")
+    
+    if not GIT_AVAILABLE:
+        logger.error("GitPython library not available. Git operations cannot be performed.")
+        return
+    
+    try:
+        repository_manager = get_repository_manager()
+        
+        # Get repository from database
+        async for session in get_session():
+            try:
+                # Get repository
+                repository = await get_repository(session, repository_id)
+                
+                if not repository:
+                    logger.error(f"Repository with ID {repository_id} not found.")
+                    return
+                
+                # Update repository state to SYNCING
+                await update_repository_state(
                     session=session,
-                    repository_url=repo_url,
-                    repository_path=repo_path
+                    repository_id=repository.id,
+                    sync_status=SyncStatus.SYNCING
                 )
                 
-                # Check if repository exists
-                if not os.path.exists(os.path.join(repo_path, '.git')):
-                    logger.info(f"Repository does not exist at {repo_path}. Will attempt to clone.")
+                # Get or set local path
+                if not repository.local_path:
+                    repository.local_path = repository_manager.get_local_path(repository)
+                    await session.commit()
+                
+                # Check if repository exists locally
+                if not os.path.exists(os.path.join(repository.local_path, '.git')):
+                    logger.info(f"Repository does not exist at {repository.local_path}. Will attempt to clone.")
                     
-                    success = await clone_repository(settings, repo_path)
+                    # Clone repository
+                    success, error_message = await repository_manager.clone_repository(repository)
+                    
                     if success:
                         # If clone succeeded, get repository details
-                        repo = Repo(repo_path)
+                        repo = Repo(repository.local_path)
                         current_sha = repo.head.commit.hexsha
                         current_branch = repo.active_branch.name
                         commit_message = repo.head.commit.message
@@ -110,342 +167,204 @@ async def poll_git_repository():
                         commit_date = datetime.fromtimestamp(repo.head.commit.committed_date, UTC)
                         
                         # Update repository state
-                        await update_after_git_pull(
+                        await create_repository_state(
                             session=session,
-                            repository_url=repo_url,
-                            was_pulled=True,
-                            current_sha=current_sha,
-                            is_local_repo_valid=True,
-                            current_branch=current_branch,
+                            repository_id=repository.id,
+                            commit_sha=current_sha,
+                            commit_short_sha=current_sha[:10],
                             commit_message=commit_message,
                             commit_author=commit_author,
-                            commit_date=commit_date
+                            commit_date=commit_date,
+                            sync_status=SyncStatus.IDLE,
+                            is_local_repo_valid=True
                         )
                         
-                        changes_detected = True
+                        # Process repository changes
+                        await process_repository_changes(repository)
                     else:
-                        await set_sync_status(
+                        # Update repository state with error
+                        await update_repository_state(
                             session=session,
-                            repository_url=repo_url,
-                            status=SyncStatus.ERROR,
-                            error_message="Failed to clone repository"
+                            repository_id=repository.id,
+                            sync_status=SyncStatus.ERROR,
+                            sync_error=error_message
                         )
                 else:
-                    logger.info(f"Repository exists at {repo_path}. Checking for updates.")
+                    logger.info(f"Repository exists at {repository.local_path}. Checking for updates.")
                     
-                    # Perform pull operation and get results
-                    was_pulled, current_sha, previous_sha, pull_details = await pull_repository_changes(settings, repo_path)
+                    # Pull changes from repository
+                    was_pulled, error_message, current_sha, previous_sha = await repository_manager.pull_repository(repository)
+                    
+                    # Get repository state
+                    repo_state = await get_repository_state(session, repository.id)
                     
                     # Check if this is a fresh repository state
-                    is_first_run = repo_state.commit_sha is None
+                    is_first_run = repo_state is None or repo_state.commit_sha is None
                     
-                    # Update database with results
-                    await update_after_git_pull(
-                        session=session,
-                        repository_url=repo_url,
-                        was_pulled=was_pulled,
-                        current_sha=current_sha,
-                        is_local_repo_valid=True,
-                        current_branch=pull_details.get('current_branch'),
-                        commit_message=pull_details.get('commit_message'),
-                        commit_author=pull_details.get('commit_author'),
-                        commit_date=pull_details.get('commit_date'),
-                        error_message=pull_details.get('error')
-                    )
-                    
-                    # Force changes_detected to True if this is first run after DB reset
-                    changes_detected = was_pulled or is_first_run
-                    if is_first_run:
-                        logger.info("First run after database reset. Forcing full project scan.")
-                
-                # If changes were detected, trigger necessary actions
-                if changes_detected:
-                    logger.info("Changes detected in repository. Triggering sync actions...")
-                    await process_repository_changes(repo_path, settings)
-                else:
-                    logger.info("No changes detected in repository. No action needed.")
-            
+                    if was_pulled or is_first_run:
+                        # Changes were pulled or this is first run
+                        if current_sha:
+                            # Get commit details
+                            repo = Repo(repository.local_path)
+                            commit = repo.commit(current_sha)
+                            commit_message = commit.message
+                            commit_author = f"{commit.author.name} <{commit.author.email}>"
+                            commit_date = datetime.fromtimestamp(commit.committed_date, UTC)
+                            
+                            # Update repository state
+                            await create_repository_state(
+                                session=session,
+                                repository_id=repository.id,
+                                commit_sha=current_sha,
+                                commit_short_sha=current_sha[:10],
+                                commit_message=commit_message,
+                                commit_author=commit_author,
+                                commit_date=commit_date,
+                                sync_status=SyncStatus.IDLE,
+                                is_local_repo_valid=True
+                            )
+                            
+                            # Process repository changes
+                            await process_repository_changes(repository)
+                        else:
+                            # Update repository state with error
+                            await update_repository_state(
+                                session=session,
+                                repository_id=repository.id,
+                                sync_status=SyncStatus.ERROR,
+                                sync_error=error_message or "Unknown error"
+                            )
+                    else:
+                        # No changes detected
+                        logger.info(f"No changes detected in repository {repository.id}.")
+                        
+                        # Update last sync time but keep state the same
+                        await update_repository_state(
+                            session=session,
+                            repository_id=repository.id,
+                            sync_status=SyncStatus.IDLE
+                        )
             except Exception as e:
-                logger.exception("Error updating repository state in database", exc_info=e)
-                error_message = str(e)
+                logger.exception(f"Error polling repository {repository_id}", exc_info=e)
                 
-                # Update sync status to error
-                await set_sync_status(
-                    session=session,
-                    repository_url=repo_url,
-                    status=SyncStatus.ERROR,
-                    error_message=error_message
-                )
-                
-        logger.info("Git repository polling completed.")
-    except Exception as e:
-        logger.exception("Error during Git repository polling", exc_info=e)
-
-
-async def clone_repository(settings, repo_path):
-    """
-    Clone the repository to the specified path.
-    
-    Args:
-        settings: Application settings with Git configuration
-        repo_path: Path where the repository should be cloned
-    
-    Returns:
-        bool: True if clone was successful, False otherwise
-    """
-    if not GIT_AVAILABLE:
-        logger.error("GitPython library not available. Cannot clone repository.")
-        return False
-    
-    try:
-        # Ensure parent directory exists
-        os.makedirs(os.path.dirname(repo_path), exist_ok=True)
-        
-        # Get repository URL from settings
-        repo_url = settings.git.REPO_URL
-        
-        # Determine authentication method
-        auth_type = settings.git.AUTH_TYPE.lower()
-        
-        if auth_type == 'token' and settings.git.REPO_TOKEN:
-            # Format URL with token
-            if 'github.com' in repo_url:
-                # GitHub format
-                if 'https://' in repo_url:
-                    auth_url = repo_url.replace('https://', f'https://{settings.git.REPO_TOKEN}@')
-                else:
-                    auth_url = f'https://{settings.git.REPO_TOKEN}@github.com/{repo_url.split("github.com/")[1]}'
-        elif auth_type == 'password' and settings.git.REPO_PASSWORD:
-            if 'https://' in repo_url:
-                # Add username and password
-                auth_url = repo_url.replace('https://', f'https://{settings.git.REPO_USERNAME}:{settings.git.REPO_PASSWORD}@')
-        else:
-            # No authentication info provided
-            auth_url = repo_url
-        
-        logger.info(f"Cloning repository from {auth_url.split('@')[1] if '@' in auth_url else auth_url}")
-        
-        try:
-            # Try authenticated clone first
-            Repo.clone_from(auth_url, repo_path)
-            logger.info(f"Repository successfully cloned to {repo_path}")
-            return True
-        except git.GitCommandError as e:
-            if "Invalid username or password" in str(e) or "Authentication failed" in str(e):
-                # Authentication failed, try without authentication for public repos
-                logger.warning("Authentication failed, trying without credentials for public repository...")
+                # Update repository state with error
                 try:
-                    # Try public URL without auth
-                    Repo.clone_from(repo_url, repo_path)
-                    logger.info(f"Repository successfully cloned to {repo_path} (public access)")
-                    return True
-                except Exception as e2:
-                    logger.exception(f"Failed to clone repository without authentication", exc_info=e2)
-                    return False
-            else:
-                # Some other error occurred
-                raise
+                    await update_repository_state(
+                        session=session,
+                        repository_id=repository_id,
+                        sync_status=SyncStatus.ERROR,
+                        sync_error=str(e)
+                    )
+                except Exception:
+                    pass
     except Exception as e:
-        logger.exception(f"Failed to clone repository to {repo_path}", exc_info=e)
-        return False
+        logger.exception(f"Error during repository polling", exc_info=e)
 
 
-async def pull_repository_changes(settings, repo_path):
+async def process_repository_changes(repository: Repository):
     """
-    Pull changes from the remote repository.
+    Process the changes in a repository and trigger necessary actions.
     
     Args:
-        settings: Application settings
-        repo_path: Path to the local repository
-    
-    Returns:
-        tuple: (was_pulled, current_sha, previous_sha, details)
-            was_pulled: Whether changes were pulled
-            current_sha: Current commit SHA
-            previous_sha: Previous commit SHA
-            details: Dictionary with additional details
-    """
-    if not GIT_AVAILABLE:
-        logger.error("GitPython library not available. Cannot pull repository changes.")
-        return False, None, None, {'error': 'GitPython not available'}
-    
-    details = {}
-    
-    try:
-        # Open the repository
-        repo = Repo(repo_path)
-        
-        # Get current HEAD SHA
-        previous_sha = repo.head.commit.hexsha
-        current_branch = repo.active_branch.name
-        
-        details['current_branch'] = current_branch
-        details['commit_message'] = repo.head.commit.message
-        details['commit_author'] = f"{repo.head.commit.author.name} <{repo.head.commit.author.email}>"
-        details['commit_date'] = datetime.fromtimestamp(repo.head.commit.committed_date, UTC)
-        
-        logger.info(f"Current repository state: branch={current_branch}, sha={previous_sha[:8]}")
-        
-        # Set Git identity for potential merge conflict resolution
-        repo.git.config('user.name', settings.git.REPO_USERNAME)
-        repo.git.config('user.email', settings.git.REPO_EMAIL)
-        
-        # Fetch latest changes
-        logger.info("Fetching latest changes from remote...")
-        for remote in repo.remotes:
-            remote.fetch()
-        
-        # Get remote tracking branch
-        tracking_branch = repo.active_branch.tracking_branch()
-        if not tracking_branch:
-            logger.warning(f"Branch {current_branch} has no tracking branch. Setting up tracking.")
-            # Set up tracking to origin/current_branch
-            repo.git.branch(f"--set-upstream-to=origin/{current_branch}", current_branch)
-            tracking_branch = repo.active_branch.tracking_branch()
-        
-        # Get remote HEAD SHA
-        remote_sha = repo.git.rev_parse(tracking_branch.name)
-        
-        # Compare local and remote SHAs
-        if previous_sha != remote_sha:
-            logger.info(f"Repository is behind remote. Local: {previous_sha[:8]}, Remote: {remote_sha[:8]}")
-            
-            # Pull changes
-            logger.info("Pulling changes from remote...")
-            pull_info = repo.git.pull()
-            
-            # Get new HEAD SHA
-            current_sha = repo.head.commit.hexsha
-            
-            # Update details with new commit info
-            details['commit_message'] = repo.head.commit.message
-            details['commit_author'] = f"{repo.head.commit.author.name} <{repo.head.commit.author.email}>"
-            details['commit_date'] = datetime.fromtimestamp(repo.head.commit.committed_date, UTC)
-            
-            # Log changes
-            commits_behind = list(repo.iter_commits(f"{previous_sha}..{current_sha}"))
-            logger.info(f"Pulled {len(commits_behind)} commits. New HEAD: {current_sha[:8]}")
-            
-            # Log commit messages
-            for commit in commits_behind:
-                logger.info(f"Commit {commit.hexsha[:8]}: {commit.summary}")
-            
-            return True, current_sha, previous_sha, details
-        else:
-            logger.info("Repository is up to date with remote.")
-            return False, previous_sha, previous_sha, details
-    except git.GitCommandError as e:
-        logger.exception(f"Git command error while pulling repository", exc_info=e)
-        details['error'] = str(e)
-        return False, None, None, details
-    except Exception as e:
-        logger.exception(f"Error pulling repository changes", exc_info=e)
-        details['error'] = str(e)
-        return False, None, None, details
-
-
-async def process_repository_changes(repo_path, settings):
-    """
-    Process the changes in the repository and trigger necessary actions.
-    
-    Args:
-        repo_path: Path to the repository
-        settings: Application settings
+        repository: Repository object
     """
     try:
-        logger.info("Processing repository changes...")
+        logger.info(f"Processing changes in repository {repository.id}...")
         
-        # Create repository scanners
-        project_scanner = ProjectScanner(repo_path)
-        dataset_scanner = DatasetScanner(repo_path)
-        pipeline_scanner = PipelineScanner(repo_path)
-        environment_scanner = EnvironmentScanner(repo_path)
+        # Get configuration settings
+        config_manager = get_config_manager()
+        if not config_manager:
+            logger.warning("Config manager not available. Skipping repository processing.")
+            return
+            
+        settings = config_manager.get_root_settings()
+        
+        # Determine which types of entities to scan based on repository type and resource_types
+        entity_types_to_scan = []
+        
+        if repository.entity_type == EntityType.MASTER.value:
+            # Master repository scans all entity types by default
+            entity_types_to_scan = ['project', 'environment', 'dataset', 'pipeline']
+        elif repository.entity_type == EntityType.PROJECT.value:
+            # Project repository can scan environments and their resources
+            if '*' in repository.resource_types or 'environment' in repository.resource_types:
+                entity_types_to_scan.append('environment')
+            if '*' in repository.resource_types or 'dataset' in repository.resource_types:
+                entity_types_to_scan.append('dataset')
+            if '*' in repository.resource_types or 'pipeline' in repository.resource_types:
+                entity_types_to_scan.append('pipeline')
+        elif repository.entity_type == EntityType.ENVIRONMENT.value:
+            # Environment repository can scan datasets and pipelines
+            if '*' in repository.resource_types or 'dataset' in repository.resource_types:
+                entity_types_to_scan.append('dataset')
+            if '*' in repository.resource_types or 'pipeline' in repository.resource_types:
+                entity_types_to_scan.append('pipeline')
+                
+        # Path within repository
+        repo_path = repository.local_path
+        if repository.path_in_repo:
+            repo_path = os.path.join(repo_path, repository.path_in_repo)
+            
+        # Create repository scanners as needed
+        scanners = {}
+        if 'project' in entity_types_to_scan:
+            scanners['project'] = ProjectScanner(repo_path)
+            if hasattr(scanners['project'], 'repository'):
+                scanners['project'].repository = repository
+        if 'environment' in entity_types_to_scan:
+            scanners['environment'] = EnvironmentScanner(repo_path)
+            if hasattr(scanners['environment'], 'repository'):
+                scanners['environment'].repository = repository
+        if 'dataset' in entity_types_to_scan:
+            scanners['dataset'] = DatasetScanner(repo_path)
+            if hasattr(scanners['dataset'], 'repository'):
+                scanners['dataset'].repository = repository
+        if 'pipeline' in entity_types_to_scan:
+            scanners['pipeline'] = PipelineScanner(repo_path)
+            if hasattr(scanners['pipeline'], 'repository'):
+                scanners['pipeline'].repository = repository
         
         # Scan for entities in the repository
         async for session in get_session():
             try:
                 # Get repository state to access SHAs
-                repo_url = settings.git.REPO_URL
-                repo_state = await get_or_create_repository_state(
-                    session=session,
-                    repository_url=repo_url,
-                    repository_path=repo_path
-                )
+                repo_state = await get_repository_state(session, repository.id)
                 
-                # Scan for entities using git diff if we have previous state
+                if not repo_state:
+                    logger.warning(f"No state found for repository {repository.id}. Cannot determine previous SHA.")
+                    return
+                    
+                # Get previous and current SHA
                 previous_sha = None
-                current_sha = None
+                current_sha = repo_state.commit_sha
                 
-                if repo_state:
-                    previous_sha = repo_state.commit_sha
-                    # Current SHA is obtained from the local repository
-                    repo = Repo(repo_path)
-                    current_sha = repo.head.commit.hexsha
+                # Scan for entities using each scanner
+                for entity_type, scanner in scanners.items():
+                    entities = await scanner.scan_repository(
+                        previous_sha=previous_sha,
+                        current_sha=current_sha
+                    )
                     
-                # Scan the repository for projects
-                projects = await project_scanner.scan_repository(
-                    previous_sha=previous_sha,
-                    current_sha=current_sha
-                )
+                    if not entities:
+                        logger.info(f"No {entity_type} entities found in repository {repository.id}.")
+                    else:
+                        logger.info(f"Found {len(entities)} {entity_type} entities in repository {repository.id}.")
+                        
+                        # Add source repository info to entities if they support it
+                        for entity in entities:
+                            if hasattr(entity, 'source_repository_url'):
+                                entity.source_repository_url = repository.url
+                            if hasattr(entity, 'source_repository_path'):
+                                entity.source_repository_path = repository.path_in_repo
+                        
+                        # Reconcile entities with database
+                        result = await scanner.reconcile_entities(session, entities)
+                        logger.info(f"{entity_type.capitalize()} reconciliation: {result}")
                 
-                if not projects:
-                    logger.info("No projects found in the repository.")
-                else:
-                    logger.info(f"Found {len(projects)} projects in the repository.")
-                    
-                    # Reconcile projects with database
-                    result = await project_scanner.reconcile_entities(session, projects)
-                    logger.info(f"Project reconciliation: {result}")
+                logger.info(f"Repository changes for {repository.id} processed successfully.")
                 
-                # Scan the repository for datasets
-                datasets = await dataset_scanner.scan_repository(
-                    previous_sha=previous_sha,
-                    current_sha=current_sha
-                )
-                
-                if not datasets:
-                    logger.info("No datasets found in the repository.")
-                else:
-                    logger.info(f"Found {len(datasets)} datasets in the repository.")
-                    
-                    # Reconcile datasets with database
-                    result = await dataset_scanner.reconcile_entities(session, datasets)
-                    logger.info(f"Dataset reconciliation: {result}")
-                
-                # Scan the repository for pipelines
-                pipelines = await pipeline_scanner.scan_repository(
-                    previous_sha=previous_sha,
-                    current_sha=current_sha
-                )
-                
-                if not pipelines:
-                    logger.info("No pipelines found in the repository.")
-                else:
-                    logger.info(f"Found {len(pipelines)} pipelines in the repository.")
-                    
-                    # Reconcile pipelines with database
-                    result = await pipeline_scanner.reconcile_entities(session, pipelines)
-                    logger.info(f"Pipeline reconciliation: {result}")
-                
-                # Scan the repository for environments
-                environments = await environment_scanner.scan_repository(
-                    previous_sha=previous_sha,
-                    current_sha=current_sha
-                )
-                
-                if not environments:
-                    logger.info("No environments found in the repository.")
-                else:
-                    logger.info(f"Found {len(environments)} environments in the repository.")
-                    
-                    # Reconcile environments with database
-                    result = await environment_scanner.reconcile_entities(session, environments)
-                    logger.info(f"Environment reconciliation: {result}")
-                
-                logger.info("Repository changes processed successfully.")
-                break
             except Exception as e:
-                logger.exception("Error during entity reconciliation", exc_info=e)
+                logger.exception(f"Error during entity reconciliation", exc_info=e)
         
     except Exception as e:
-        logger.exception("Error processing repository changes", exc_info=e) 
+        logger.exception(f"Error processing repository changes", exc_info=e) 

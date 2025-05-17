@@ -1,0 +1,17 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Pipeline
+metadata:
+  name: etl
+spec:
+  description: "ETL Pipeline for Project 1 Dev"
+  project: project1
+  environment: dev
+  input:
+    - dataset: customers
+  output:
+    dataset: customers_processed
+  steps:
+    - name: clean
+      type: transform
+      config:
+        script: "clean_data.py" 

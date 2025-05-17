@@ -248,19 +248,83 @@ class ProjectScanner(EntityScanner):
         from mlpie.db.models.project import Project
         super().__init__(repo_path)
         self.model_class = Project
+        self.repository = None  # Will be set by caller if scanning from a specific repository
     
     def _validate_entity_type(self, kind: str, api_version: str) -> bool:
         """
-        Check if this is a Project definition.
+        Validate if this YAML defines a project.
         
         Args:
             kind: Kind field from YAML
             api_version: apiVersion field from YAML
             
         Returns:
-            True if this is a Project, False otherwise
+            True if this is a project, False otherwise
         """
-        return kind == "Project" and api_version.startswith("mlpie.ai/")
+        return kind and kind.lower() == "project"
+    
+    def _parse_entity_file(self, file_path: str) -> Optional[T]:
+        """
+        Parse a project definition file.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Project instance or None if the file doesn't define a valid project
+        """
+        try:
+            # Get relative path from repo root
+            rel_path = os.path.relpath(file_path, self.repo_path)
+            
+            # Load YAML file
+            with open(file_path, 'r') as f:
+                content = yaml.safe_load(f)
+                
+            # Validate basic structure
+            if not content:
+                logger.debug(f"Empty YAML file: {rel_path}")
+                return None
+                
+            if not isinstance(content, dict):
+                logger.warning(f"Invalid YAML structure in {rel_path}: not a dictionary")
+                return None
+                
+            # Check for expected K8s-like structure
+            kind = content.get('kind')
+            api_version = content.get('apiVersion')
+            
+            if not self._validate_entity_type(kind, api_version):
+                # Not our entity type or missing required fields
+                return None
+                
+            # If we're scanning from a repository, extract repository info to store with project
+            source_repo_url = None
+            source_repo_path = None
+            
+            if hasattr(self, "repository") and self.repository:
+                source_repo_url = self.repository.url
+                source_repo_path = self.repository.path_in_repo
+            
+            # Create project from spec
+            project = self.model_class.from_yaml_spec(
+                content, 
+                source_path=rel_path
+            )
+            
+            # Store repository info as attributes
+            if project and source_repo_url:
+                project.source_repository_url = source_repo_url
+                project.source_repository_path = source_repo_path
+                
+            return project
+                
+        except yaml.YAMLError as e:
+            logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
+            return None
+        except Exception as e:
+            logger.exception(f"Error processing project file {file_path}", exc_info=e)
+            return None
     
     async def reconcile_entities(self, 
                                 session: AsyncSession, 
@@ -301,6 +365,7 @@ class DatasetScanner(EntityScanner):
         from mlpie.db.models.dataset import Dataset
         super().__init__(repo_path)
         self.model_class = Dataset
+        self.repository = None  # Will be set by caller if scanning from a specific repository
     
     def _validate_entity_type(self, kind: str, api_version: str) -> bool:
         """
@@ -350,58 +415,27 @@ class DatasetScanner(EntityScanner):
                 # Not our entity type or missing required fields
                 return None
                 
-            # Extract core fields from spec
-            metadata = content.get("metadata", {})
-            spec = content.get("spec", {})
+            # If we're scanning from a repository, extract repository info to store with dataset
+            source_repo_url = None
+            source_repo_path = None
             
-            # Create dataset instance with basic fields
-            from mlpie.db.models.dataset import Dataset
-            dataset = Dataset(
-                name=metadata.get("name"),
-                description=metadata.get("description"),
-                version=metadata.get("version"),
-                format=spec.get("format", ""),
-                spec=content,
-                active=True,
-                labels=metadata.get("labels"),
-                status="Ready"
+            if hasattr(self, "repository") and self.repository:
+                source_repo_url = self.repository.url
+                source_repo_path = self.repository.path_in_repo
+            
+            # Create dataset from spec
+            return self.model_class.from_yaml_spec(
+                content, 
+                source_path=rel_path,
+                source_repo_url=source_repo_url,
+                source_repo_path=source_repo_path
             )
-            
-            # Extract source information
-            source = spec.get("source", {})
-            if source:
-                dataset.source_type = source.get("type")
-                
-                # Get connection details
-                connection = source.get("connection", {})
-                if connection and isinstance(connection, dict):
-                    dataset.host = connection.get("host")
-                    dataset.port = connection.get("port")
-                    dataset.database = connection.get("database")
-                    
-                    # Get K8s-style secret references
-                    credentials_from = connection.get("credentialsFrom", {})
-                    if credentials_from:
-                        secret_key_ref = credentials_from.get("secretKeyRef", {})
-                        if secret_key_ref:
-                            dataset.credentials_secret_name = secret_key_ref.get("name")
-                            dataset.credentials_username_key = secret_key_ref.get("usernameKey")
-                            dataset.credentials_password_key = secret_key_ref.get("passwordKey")
-            
-            # Handle project reference
-            project_ref = spec.get("projectRef")
-            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-                # We'll need to resolve this project name to an ID when reconciling
-                # Store the project name in the spec for now
-                dataset.project_id = None  # Will be resolved during reconciliation
-            
-            return dataset
                 
         except yaml.YAMLError as e:
             logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
             return None
         except Exception as e:
-            logger.exception(f"Error processing entity file {file_path}", exc_info=e)
+            logger.exception(f"Error processing dataset file {file_path}", exc_info=e)
             return None
     
     async def reconcile_entities(self, 
@@ -443,19 +477,20 @@ class PipelineScanner(EntityScanner):
         from mlpie.db.models.pipeline import Pipeline
         super().__init__(repo_path)
         self.model_class = Pipeline
+        self.repository = None  # Will be set by caller if scanning from a specific repository
     
     def _validate_entity_type(self, kind: str, api_version: str) -> bool:
         """
-        Check if this is a Pipeline definition.
+        Validate if this YAML defines a pipeline.
         
         Args:
             kind: Kind field from YAML
             api_version: apiVersion field from YAML
             
         Returns:
-            True if this is a Pipeline, False otherwise
+            True if this is a pipeline, False otherwise
         """
-        return kind == "Pipeline" and api_version.startswith("mlpie.ai/")
+        return kind and kind.lower() == "pipeline"
     
     def _parse_entity_file(self, file_path: str) -> Optional[T]:
         """
@@ -491,39 +526,28 @@ class PipelineScanner(EntityScanner):
             if not self._validate_entity_type(kind, api_version):
                 # Not our entity type or missing required fields
                 return None
-                
-            # Extract core fields from spec
-            metadata = content.get("metadata", {})
-            spec = content.get("spec", {})
             
-            # Create pipeline instance with basic fields
-            from mlpie.db.models.pipeline import Pipeline
-            pipeline = Pipeline(
-                name=metadata.get("name"),
-                description=metadata.get("description"),
-                version=metadata.get("version"),
-                engine=spec.get("engine", ""),
-                code=spec.get("code", ""),
-                spec=content,
-                active=True,
-                labels=metadata.get("labels"),
-                status="Ready"
+            # If we're scanning from a repository, extract repository info to store with pipeline
+            source_repo_url = None
+            source_repo_path = None
+            
+            if hasattr(self, "repository") and self.repository:
+                source_repo_url = self.repository.url
+                source_repo_path = self.repository.path_in_repo
+            
+            # Create pipeline from spec
+            return self.model_class.from_yaml_spec(
+                content, 
+                source_path=rel_path,
+                source_repo_url=source_repo_url,
+                source_repo_path=source_repo_path
             )
-            
-            # Handle project reference
-            project_ref = spec.get("projectRef")
-            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-                # We'll need to resolve this project name to an ID when reconciling
-                # Store the project name in the spec for now
-                pipeline.project_id = None  # Will be resolved during reconciliation
-                
-            return pipeline
                 
         except yaml.YAMLError as e:
             logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
             return None
         except Exception as e:
-            logger.exception(f"Error processing entity file {file_path}", exc_info=e)
+            logger.exception(f"Error processing pipeline file {file_path}", exc_info=e)
             return None
     
     async def reconcile_entities(self, 
@@ -565,19 +589,20 @@ class EnvironmentScanner(EntityScanner):
         from mlpie.db.models.environment import Environment
         super().__init__(repo_path)
         self.model_class = Environment
+        self.repository = None  # Will be set by caller if scanning from a specific repository
     
     def _validate_entity_type(self, kind: str, api_version: str) -> bool:
         """
-        Check if this is an Environment definition.
+        Validate if this YAML defines an environment.
         
         Args:
             kind: Kind field from YAML
             api_version: apiVersion field from YAML
             
         Returns:
-            True if this is an Environment, False otherwise
+            True if this is an environment, False otherwise
         """
-        return kind == "Environment" and api_version.startswith("mlpie.ai/")
+        return kind and kind.lower() == "environment"
     
     def _parse_entity_file(self, file_path: str) -> Optional[T]:
         """
@@ -614,27 +639,24 @@ class EnvironmentScanner(EntityScanner):
                 # Not our entity type or missing required fields
                 return None
                 
-            # Extract core fields from spec
-            metadata = content.get("metadata", {})
-            spec = content.get("spec", {})
+            # If we're scanning from a repository, extract repository info to store with environment
+            source_repo_url = None
+            source_repo_path = None
             
-            # Create environment instance with basic fields
-            from mlpie.db.models.environment import Environment
-            environment = Environment(
-                name=content.get("name") or metadata.get("name"),  # Try root level first, then metadata
-                description=metadata.get("description"),
-                version=metadata.get("version"),
-                spec=content,
-                active=True,
-                labels=metadata.get("labels"),
-                status="Ready",
+            if hasattr(self, "repository") and self.repository:
+                source_repo_url = self.repository.url
+                source_repo_path = self.repository.path_in_repo
+            
+            # Create environment from spec
+            environment = self.model_class.from_yaml_spec(
+                content, 
                 source_path=rel_path
             )
             
-            # Handle project reference
-            project_ref = spec.get("projectRef")
-            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-                environment.project_name = project_ref.get("name")  # Use project_name instead of project_id
+            # Store repository info
+            if environment and source_repo_url:
+                environment.source_repository_url = source_repo_url
+                environment.source_repository_path = source_repo_path
                 
             return environment
                 
@@ -642,7 +664,7 @@ class EnvironmentScanner(EntityScanner):
             logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
             return None
         except Exception as e:
-            logger.exception(f"Error processing entity file {file_path}", exc_info=e)
+            logger.exception(f"Error processing environment file {file_path}", exc_info=e)
             return None
     
     async def reconcile_entities(self, 

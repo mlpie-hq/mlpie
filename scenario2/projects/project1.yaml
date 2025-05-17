@@ -1,0 +1,7 @@
+apiVersion: mlpie.ai/v1alpha1
+kind: Project
+metadata:
+  name: project1
+spec:
+  description: "Example Project 1"
+  # No repository specified for environments - will use master repo 

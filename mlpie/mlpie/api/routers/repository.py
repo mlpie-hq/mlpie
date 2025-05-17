@@ -9,13 +9,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from mlpie.db.connection import get_session
 from mlpie.db.crud.repository import (
-    get_repository_state, get_all_repository_states, get_repository_state_by_id
+    get_repository_state, get_all_repository_states, get_repository_state_by_id,
+    get_repository
 )
 from mlpie.api.schemas.repository import RepositoryStateResponse, SyncStatusResponse
 from mlpie.api.schemas.config import StatusResponse  # Import StatusResponse for sync endpoint
+from mlpie.db.models.repository import Repository  # Add the Repository model import
 
 
 router = APIRouter(
@@ -75,7 +78,20 @@ async def get_repository_by_url(
     Returns:
         Repository state information
     """
-    repo_state = await get_repository_state(session, repo_url)
+    # First, find the repository by URL
+    result = await session.execute(
+        select(Repository).filter(Repository.url == repo_url)
+    )
+    repository = result.scalars().first()
+    
+    if not repository:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository with URL {repo_url} not found"
+        )
+    
+    # Then get its state
+    repo_state = await get_repository_state(session, repository.id)
     if not repo_state:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
