@@ -68,31 +68,7 @@ async def create_pipeline(session: AsyncSession, pipeline_data: Dict[str, Any]) 
         
     Returns:
         Created pipeline object
-        
-    Raises:
-        ValueError: If required fields are missing or if referenced entities don't exist
     """
-    # Validate required fields
-    if not pipeline_data.get("environment_name"):
-        raise ValueError("Environment reference (environment_name) is required for pipeline")
-        
-    # Import here to avoid circular imports
-    from mlpie.db.crud.environment import get_environment_by_name
-    from mlpie.db.crud.project import get_project_by_name
-    
-    # Verify that the referenced environment exists
-    environment_name = pipeline_data.get("environment_name")
-    environment = await get_environment_by_name(session, environment_name)
-    if not environment:
-        raise ValueError(f"Pipeline references non-existent environment '{environment_name}'")
-    
-    # Verify that the referenced project exists (if specified)
-    project_name = pipeline_data.get("project_name")
-    if project_name:
-        project = await get_project_by_name(session, project_name)
-        if not project:
-            raise ValueError(f"Pipeline references non-existent project '{project_name}'")
-    
     # Create and save the pipeline
     pipeline = Pipeline(**pipeline_data)
     session.add(pipeline)
@@ -133,6 +109,31 @@ async def delete_pipeline(session: AsyncSession, name: str) -> bool:
     return result.rowcount > 0
 
 
+async def get_pipeline_by_context(session: AsyncSession, name: str, environment_name: str, project_name: Optional[str] = None) -> Optional[Pipeline]:
+    """
+    Get a pipeline by its full context (name, environment, and optionally project).
+    
+    Args:
+        session: Database session
+        name: Pipeline name
+        environment_name: Environment name
+        project_name: Project name (optional)
+        
+    Returns:
+        Pipeline instance or None if not found
+    """
+    query = select(Pipeline).where(
+        (Pipeline.name == name) & 
+        (Pipeline.environment_name == environment_name)
+    )
+    
+    if project_name:
+        query = query.where(Pipeline.project_name == project_name)
+        
+    result = await session.execute(query)
+    return result.scalars().first()
+
+
 async def reconcile_pipelines(
     session: AsyncSession,
     scanned_pipelines: List[Pipeline]
@@ -155,40 +156,46 @@ async def reconcile_pipelines(
     }
     
     # Import here to avoid circular imports
-    from mlpie.db.crud.environment import get_environment_by_name
+    from mlpie.db.crud.environment import get_environment_by_context
     from mlpie.db.crud.project import get_project_by_name
     
-    # Track processed pipelines by name for potential cleanup
-    processed_names = set()
+    # Track processed pipelines by unique key for potential cleanup
+    processed_keys = set()
     
     # Process each scanned pipeline
     for pipeline in scanned_pipelines:
         name = pipeline.name
-        processed_names.add(name)
+        environment_name = pipeline.environment_name
+        project_name = pipeline.project_name
+        
+        # Create a unique identifier for this pipeline based on its context
+        context_key = f"{name}:{environment_name}:{project_name or 'none'}"
+        processed_keys.add(context_key)
         
         # Validate required environment reference
-        if not pipeline.environment_name:
+        if not environment_name:
             logger.error(f"Pipeline {name} is missing required environmentRef.name field - skipping")
             counters["skipped"] += 1
             continue
-            
-        # Verify that the referenced environment exists
-        environment = await get_environment_by_name(session, pipeline.environment_name)
-        if not environment:
-            logger.error(f"Pipeline {name} references non-existent environment '{pipeline.environment_name}' - skipping")
-            counters["skipped"] += 1
-            continue
-            
+        
         # Verify that the referenced project exists (if specified)
-        if pipeline.project_name:
-            project = await get_project_by_name(session, pipeline.project_name)
+        if project_name:
+            project = await get_project_by_name(session, project_name)
             if not project:
-                logger.error(f"Pipeline {name} references non-existent project '{pipeline.project_name}' - skipping")
+                logger.error(f"Pipeline {name} references non-existent project '{project_name}' - skipping")
                 counters["skipped"] += 1
                 continue
+            
+        # Verify that the referenced environment exists in the proper context
+        environment = await get_environment_by_context(session, environment_name, project_name)
+        if not environment:
+            project_context = f" in project '{project_name}'" if project_name else ""
+            logger.error(f"Pipeline {name} references non-existent environment '{environment_name}'{project_context} - skipping")
+            counters["skipped"] += 1
+            continue
         
-        # Check if pipeline exists
-        existing_pipeline = await get_pipeline_by_name(session, name)
+        # Check if pipeline exists in the same context (environment and project)
+        existing_pipeline = await get_pipeline_by_context(session, name, environment_name, project_name)
         
         if existing_pipeline:
             # Update existing pipeline

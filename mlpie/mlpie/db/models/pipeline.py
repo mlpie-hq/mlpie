@@ -11,23 +11,27 @@ from uuid import uuid4
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.schema import UniqueConstraint
 
 from mlpie.db.base import Base
 
 
 class Pipeline(Base):
     __tablename__ = "pipelines"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        UniqueConstraint('project_name', 'environment_name', 'name', name='uq_project_env_pipeline_name'),
+        {"extend_existing": True}
+    )
 
     # Core identity fields
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    name = Column(String(255), nullable=False, index=True, unique=True)
+    name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
     version = Column(String(50), nullable=True)
 
     # Engine and code
     engine = Column(String(50), nullable=False)  # dagster, airflow, kubeflow, etc.
-    code = Column(Text, nullable=False)  # Pipeline code (multi-line)
+    code = Column(Text, nullable=True)  # Pipeline code (multi-line)
 
     # Tags and categorization
     _labels = Column("labels", JSON, nullable=True, default=list)  # JSON array of labels/tags
@@ -35,8 +39,8 @@ class Pipeline(Base):
     # Full specification as JSON (K8s-like pattern)
     spec = Column(JSON, nullable=False, default={})
 
-    # Project relationship (optional)
-    project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
+    # Project relationship (REQUIRED for context)
+    project_name = Column(String(255), ForeignKey("projects.name"), nullable=False)
     project = relationship("Project", back_populates="pipelines")
     
     # Environment relationship (required)
@@ -113,9 +117,6 @@ class Pipeline(Base):
             
         Returns:
             Pipeline: A new Pipeline instance
-            
-        Raises:
-            ValueError: If required fields are missing
         """
         # Extract core fields from spec
         metadata = spec_dict.get("metadata", {})
@@ -123,25 +124,19 @@ class Pipeline(Base):
         
         # Get name from either root level or metadata
         name = spec_dict.get("name") or metadata.get("name")
-        if not name:
-            raise ValueError("Pipeline name is required")
-            
-        # Determine engine and code
         engine = spec.get("engine")
-        if not engine:
-            raise ValueError("Pipeline engine is required")
-            
-        # Pre-validate environment field before creating the entity
-        # Only accept the K8s-style environment reference format
-        env_ref = spec.get("environmentRef")
-        if not (env_ref and isinstance(env_ref, dict) and env_ref.get("name")):
-            raise ValueError("Pipeline environmentRef.name is required and must use K8s-style format")
-            
-        # Extract environment name
-        environment_name = env_ref.get("name")
-            
         code = spec.get("code", "")
         
+        # Handle environment reference - support both styles
+        # First try the new direct style
+        environment_name = spec.get("environment")
+        
+        # If not found, try K8s-style reference
+        if not environment_name:
+            env_ref = spec.get("environmentRef")
+            if env_ref and isinstance(env_ref, dict) and env_ref.get("name"):
+                environment_name = env_ref.get("name")
+                
         # Create the pipeline with base fields
         pipeline = cls(
             name=name,
@@ -159,9 +154,18 @@ class Pipeline(Base):
             environment_name=environment_name  # Set environment name directly
         )
         
-        # Handle project reference if present - only accept K8s-style format
-        project_ref = spec.get("projectRef")
-        if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-            pipeline.project_name = project_ref.get("name")
+        # Handle project reference - support both styles
+        # First try the new direct style
+        project_name = spec.get("project")
+        
+        # If not found, try K8s-style reference
+        if not project_name:
+            project_ref = spec.get("projectRef")
+            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+                project_name = project_ref.get("name")
+                
+        # Set project if provided
+        if project_name:
+            pipeline.project_name = project_name
             
         return pipeline 

@@ -131,31 +131,7 @@ async def create_dataset(session: AsyncSession, dataset_data: Dict[str, Any]) ->
         
     Returns:
         Created dataset object
-        
-    Raises:
-        ValueError: If required fields are missing or if referenced entities don't exist
     """
-    # Validate required fields
-    if not dataset_data.get("environment_name"):
-        raise ValueError("Environment reference (environment_name) is required for dataset")
-        
-    # Import here to avoid circular imports
-    from mlpie.db.crud.environment import get_environment_by_name
-    from mlpie.db.crud.project import get_project_by_name
-    
-    # Verify that the referenced environment exists
-    environment_name = dataset_data.get("environment_name")
-    environment = await get_environment_by_name(session, environment_name)
-    if not environment:
-        raise ValueError(f"Dataset references non-existent environment '{environment_name}'")
-    
-    # Verify that the referenced project exists (if specified)
-    project_name = dataset_data.get("project_name")
-    if project_name:
-        project = await get_project_by_name(session, project_name)
-        if not project:
-            raise ValueError(f"Dataset references non-existent project '{project_name}'")
-    
     # Create and save the dataset
     dataset = Dataset(**dataset_data)
     session.add(dataset)
@@ -196,6 +172,31 @@ async def delete_dataset(session: AsyncSession, name: str) -> bool:
     return result.rowcount > 0
 
 
+async def get_dataset_by_context(session: AsyncSession, name: str, environment_name: str, project_name: Optional[str] = None) -> Optional[Dataset]:
+    """
+    Get a dataset by its full context (name, environment, and optionally project).
+    
+    Args:
+        session: Database session
+        name: Dataset name
+        environment_name: Environment name
+        project_name: Project name (optional)
+        
+    Returns:
+        Dataset instance or None if not found
+    """
+    query = select(Dataset).where(
+        (Dataset.name == name) & 
+        (Dataset.environment_name == environment_name)
+    )
+    
+    if project_name:
+        query = query.where(Dataset.project_name == project_name)
+        
+    result = await session.execute(query)
+    return result.scalars().first()
+
+
 async def reconcile_datasets(
     session: AsyncSession,
     scanned_datasets: List[Dataset]
@@ -218,40 +219,46 @@ async def reconcile_datasets(
     }
     
     # Import here to avoid circular imports
-    from mlpie.db.crud.environment import get_environment_by_name
+    from mlpie.db.crud.environment import get_environment_by_context
     from mlpie.db.crud.project import get_project_by_name
     
-    # Track processed datasets by name for potential cleanup
-    processed_names = set()
+    # Track processed datasets by unique key for potential cleanup
+    processed_keys = set()
     
     # Process each scanned dataset
     for dataset in scanned_datasets:
         name = dataset.name
-        processed_names.add(name)
+        environment_name = dataset.environment_name
+        project_name = dataset.project_name
+        
+        # Create a unique identifier for this dataset based on its context
+        context_key = f"{name}:{environment_name}:{project_name or 'none'}"
+        processed_keys.add(context_key)
         
         # Validate required environment reference
-        if not dataset.environment_name:
+        if not environment_name:
             logger.error(f"Dataset {name} is missing required environmentRef.name field - skipping")
             counters["skipped"] += 1
             continue
-            
-        # Verify that the referenced environment exists
-        environment = await get_environment_by_name(session, dataset.environment_name)
-        if not environment:
-            logger.error(f"Dataset {name} references non-existent environment '{dataset.environment_name}' - skipping")
-            counters["skipped"] += 1
-            continue
-            
+        
         # Verify that the referenced project exists (if specified)
-        if dataset.project_name:
-            project = await get_project_by_name(session, dataset.project_name)
+        if project_name:
+            project = await get_project_by_name(session, project_name)
             if not project:
-                logger.error(f"Dataset {name} references non-existent project '{dataset.project_name}' - skipping")
+                logger.error(f"Dataset {name} references non-existent project '{project_name}' - skipping")
                 counters["skipped"] += 1
                 continue
+            
+        # Verify that the referenced environment exists in the proper context
+        environment = await get_environment_by_context(session, environment_name, project_name)
+        if not environment:
+            project_context = f" in project '{project_name}'" if project_name else ""
+            logger.error(f"Dataset {name} references non-existent environment '{environment_name}'{project_context} - skipping")
+            counters["skipped"] += 1
+            continue
         
-        # Check if dataset exists
-        existing_dataset = await get_dataset_by_name(session, name)
+        # Check if dataset exists in the same context (environment and project)
+        existing_dataset = await get_dataset_by_context(session, name, environment_name, project_name)
         
         if existing_dataset:
             # Check if anything actually changed before updating

@@ -13,13 +13,17 @@ from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Boolean, JSON
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.schema import UniqueConstraint
 
 from mlpie.db.base import Base
 
 
 class Dataset(Base):
     __tablename__ = "datasets"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        UniqueConstraint('project_name', 'environment_name', 'name', name='uq_project_env_dataset_name'),
+        {"extend_existing": True}
+    )
 
     # Core identity fields
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -61,8 +65,8 @@ class Dataset(Base):
     # Full specification as JSON (K8s-like pattern)
     spec = Column(JSON, nullable=False, default={})
     
-    # Project relationship (optional)
-    project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
+    # Project relationship (REQUIRED for context)
+    project_name = Column(String(255), ForeignKey("projects.name"), nullable=False)
     project = relationship("Project", back_populates="datasets")
     
     # Environment relationship (required)
@@ -187,9 +191,6 @@ class Dataset(Base):
             
         Returns:
             Dataset: A new Dataset instance
-            
-        Raises:
-            ValueError: If required fields are missing
         """
         # Extract core fields from spec
         metadata = spec_dict.get("metadata", {})
@@ -197,23 +198,18 @@ class Dataset(Base):
         
         # Get name from either root level or metadata
         name = spec_dict.get("name") or metadata.get("name")
-        if not name:
-            raise ValueError("Dataset name is required")
-            
-        # Determine format
         format_value = spec.get("format")
-        if not format_value:
-            raise ValueError("Dataset format is required")
-            
-        # Pre-validate environment field before creating the entity
-        # Only accept the K8s-style environment reference format
-        env_ref = spec.get("environmentRef")
-        if not (env_ref and isinstance(env_ref, dict) and env_ref.get("name")):
-            raise ValueError("Dataset environmentRef.name is required and must use K8s-style format")
-            
-        # Extract environment name
-        environment_name = env_ref.get("name")
-            
+        
+        # Handle environment reference - support both styles
+        # First try the new direct style
+        environment_name = spec.get("environment")
+        
+        # If not found, try K8s-style reference
+        if not environment_name:
+            env_ref = spec.get("environmentRef")
+            if env_ref and isinstance(env_ref, dict) and env_ref.get("name"):
+                environment_name = env_ref.get("name")
+                
         # Create the dataset with base fields
         dataset = cls(
             name=name,
@@ -230,10 +226,19 @@ class Dataset(Base):
             environment_name=environment_name  # Set environment name directly
         )
         
-        # Handle project reference if present - only accept K8s-style format
-        project_ref = spec.get("projectRef")
-        if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-            dataset.project_name = project_ref.get("name")
+        # Handle project reference - support both styles
+        # First try the new direct style
+        project_name = spec.get("project")
+        
+        # If not found, try K8s-style reference
+        if not project_name:
+            project_ref = spec.get("projectRef")
+            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+                project_name = project_ref.get("name")
+                
+        # Set project if provided
+        if project_name:
+            dataset.project_name = project_name
             
         # Handle source information if present
         source = spec.get("source", {})

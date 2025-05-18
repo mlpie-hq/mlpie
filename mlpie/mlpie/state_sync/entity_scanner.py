@@ -7,15 +7,17 @@ using git diff to limit scanning to changed files.
 
 import os
 import logging
-import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Type, TypeVar, Generic, Tuple
 
 from git import Repo
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from mlpie.db.base import Base
 from mlpie.state_sync.scanning_context import ScanningContext
+from mlpie.schemas.yaml_utils import parse_entity_from_yaml
+from mlpie.schemas.base import EntityBase
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,8 @@ class EntityScanner(Generic[T]):
             filtered_out = 0
             for file_path in files_to_scan:
                 try:
-                    entity, errors = self._parse_entity_file(file_path)
+                    entity, errors = await self._parse_entity_file(file_path, session)
+                    
                     if errors:
                         # Track validation errors
                         rel_path = os.path.relpath(file_path, self.repo_path)
@@ -100,13 +103,6 @@ class EntityScanner(Generic[T]):
                     if entity:
                         # Filter based on context
                         if self._is_entity_relevant(entity):
-                            # Validate references to other entities
-                            reference_errors = await self._validate_entity_references(session, entity, file_path)
-                            if reference_errors:
-                                rel_path = os.path.relpath(file_path, self.repo_path)
-                                validation_errors[rel_path] = reference_errors
-                                continue
-                            
                             entities.append(entity)
                         else:
                             filtered_out += 1
@@ -207,144 +203,63 @@ class EntityScanner(Generic[T]):
         path = Path(file_path)
         return any(path.match(pattern) for pattern in self.file_patterns)
     
-    def _parse_entity_file(self, file_path: str) -> Tuple[Optional[T], List[Dict[str, str]]]:
+    async def _parse_entity_file(self, file_path: str, session: AsyncSession) -> Tuple[Optional[T], List[Dict[str, str]]]:
         """
-        Parse an entity definition file.
+        Parse an entity definition file using Pydantic models.
         
         Args:
             file_path: Path to the file
+            session: Database session for reference validation
             
         Returns:
             Tuple containing:
                 - Entity instance or None if the file doesn't define a valid entity
                 - List of validation errors (empty if no errors)
         """
-        validation_errors = []
+        # Use Pydantic model to parse the YAML file
+        pydantic_entity, validation_errors = parse_entity_from_yaml(file_path)
         
-        try:
-            # Get relative path from repo root
-            rel_path = os.path.relpath(file_path, self.repo_path)
+        if validation_errors or not pydantic_entity:
+            return None, validation_errors
             
-            # Load YAML file
-            with open(file_path, 'r') as f:
-                content = yaml.safe_load(f)
-                
-            # Validate basic structure
-            if not content:
-                logger.debug(f"Empty YAML file: {rel_path}")
-                validation_errors.append({"error": "empty_file", "message": "File is empty or contains no YAML content"})
-                return None, validation_errors
-                
-            if not isinstance(content, dict):
-                logger.warning(f"Invalid YAML structure in {rel_path}: not a dictionary")
-                validation_errors.append({"error": "invalid_structure", "message": "YAML must define a dictionary/object"})
-                return None, validation_errors
-                
-            # Check for expected K8s-like structure
-            kind = content.get('kind')
-            api_version = content.get('apiVersion')
+        # Validate that this is the right entity type for this scanner
+        if not self._validate_entity_type(pydantic_entity.kind, pydantic_entity.apiVersion):
+            return None, []  # Not an error, just not the right entity type
+        
+        # Validate entity references
+        reference_errors = await self._validate_entity_references(session, pydantic_entity, file_path)
+        if reference_errors:
+            return None, reference_errors
             
-            if not kind:
-                validation_errors.append({"error": "missing_kind", "message": "Required field 'kind' is missing"})
-                return None, validation_errors
-                
-            if not api_version:
-                validation_errors.append({"error": "missing_api_version", "message": "Required field 'apiVersion' is missing"})
-                return None, validation_errors
-                
-            if not self._validate_entity_type(kind, api_version):
-                # Not our entity type or missing required fields
-                return None, []  # No validation errors, just not relevant
-                
-            # Validate references in the spec
-            spec = content.get('spec', {})
-            
-            # Check for environment reference
-            if kind.lower() in ["pipeline", "dataset"]:
-                env_ref = spec.get("environmentRef")
-                if not (env_ref and isinstance(env_ref, dict) and env_ref.get("name")):
-                    validation_errors.append({
-                        "error": "missing_environment_ref", 
-                        "message": f"{kind} requires environmentRef.name in K8s reference format"
-                    })
-                    return None, validation_errors
-                
-            # Check for project reference
-            project_ref = spec.get("projectRef")
-            if project_ref:
-                if not (isinstance(project_ref, dict) and project_ref.get("name")):
-                    validation_errors.append({
-                        "error": "invalid_project_ref", 
-                        "message": f"projectRef must use K8s reference format with name field"
-                    })
-                    return None, validation_errors
-                
-            # Create entity from spec
+        # Convert Pydantic model to SQLAlchemy model
+        if self.model_class:
             try:
-                if hasattr(self.model_class, 'from_yaml_spec'):
-                    # Get repository info if applicable
-                    source_repo_url = None
-                    source_repo_path = None
-                    
-                    if hasattr(self, "repository") and self.repository:
-                        source_repo_url = self.repository.url
-                        source_repo_path = self.repository.path_in_repo
-                    
-                    # Check what parameters the from_yaml_spec method accepts
-                    import inspect
-                    from_yaml_spec_params = inspect.signature(self.model_class.from_yaml_spec).parameters
-                    
-                    # Create kwargs dict based on accepted parameters
-                    kwargs = {'spec_dict': content, 'source_path': rel_path}
-                    
-                    # Only add source repository parameters if the method accepts them
-                    if 'source_repo_url' in from_yaml_spec_params and source_repo_url:
-                        kwargs['source_repo_url'] = source_repo_url
-                    if 'source_repo_path' in from_yaml_spec_params and source_repo_path:
-                        kwargs['source_repo_path'] = source_repo_path
-                    
-                    # Create entity from spec with appropriate parameters
-                    entity = self.model_class.from_yaml_spec(**kwargs)
-                    
-                    # If entity doesn't have repository info but we have it, try to set it directly
-                    if entity and source_repo_url:
-                        if hasattr(entity, 'source_repository_url') and 'source_repo_url' not in from_yaml_spec_params:
-                            entity.source_repository_url = source_repo_url
-                        if hasattr(entity, 'source_repository_path') and 'source_repo_path' not in from_yaml_spec_params:
-                            entity.source_repository_path = source_repo_path
-                    
-                    return entity, []
-                else:
-                    logger.warning(f"Model class {self.model_class.__name__} missing from_yaml_spec method")
-                    validation_errors.append({"error": "model_class_error", "message": f"Model class {self.model_class.__name__} cannot parse YAML specifications"})
-                    return None, validation_errors
-            except ValueError as e:
-                # This is a validation error from the model
-                validation_errors.append({"error": "validation_error", "message": str(e)})
-                return None, validation_errors
-                
-        except yaml.YAMLError as e:
-            logger.warning(f"Error parsing YAML file {file_path}: {str(e)}")
-            validation_errors.append({"error": "yaml_syntax_error", "message": str(e)})
-            return None, validation_errors
-        except Exception as e:
-            logger.exception(f"Error processing entity file {file_path}", exc_info=e)
-            validation_errors.append({"error": "unexpected_error", "message": str(e)})
-            return None, validation_errors
+                db_dict = pydantic_entity.to_db_dict()
+                entity = self.model_class(**db_dict)
+                return entity, []
+            except Exception as e:
+                return None, [{
+                    "error": "db_model_error",
+                    "message": f"Error converting to database model: {str(e)}"
+                }]
+        else:
+            return None, [{
+                "error": "model_class_error",
+                "message": f"No model class defined for {self.entity_name} scanner"
+            }]
     
     def _validate_entity_type(self, kind: str, api_version: str) -> bool:
         """
         Validate if this YAML defines our entity type.
         
-        Subclasses should override this to check for specific kind/apiVersion.
-        
         Args:
-            kind: Kind field from YAML
-            api_version: apiVersion field from YAML
+            kind: Entity kind
+            api_version: API version
             
         Returns:
             True if this is our entity type, False otherwise
         """
+        # Default implementation - subclasses should override
         return False
     
     async def reconcile_entities(self, 
@@ -352,39 +267,41 @@ class EntityScanner(Generic[T]):
                                 entities: List[T],
                                 validation_errors: Dict[str, List[Dict[str, str]]] = None) -> Dict[str, Any]:
         """
-        Reconcile scanned entities with database state.
-        
-        This method should be implemented by subclasses to handle 
-        entity-specific reconciliation logic.
+        Reconcile scanned entities with the database.
         
         Args:
             session: Database session
-            entities: List of entities found by scanning
+            entities: List of entities
             validation_errors: Dictionary of validation errors by file path
             
         Returns:
-            Dictionary with counts of created/updated/deleted entities and errors
+            Dictionary with reconciliation results
         """
-        raise NotImplementedError("Subclasses must implement reconcile_entities")
-
+        # Default implementation - subclasses should override
+        return {
+            "scanned": len(entities),
+            "updated": 0,
+            "created": 0,
+            "deleted": 0,
+            "unchanged": 0,
+            "skipped": 0,
+            "validation_errors": len(validation_errors) if validation_errors else 0
+        }
+    
     def _is_entity_relevant(self, entity: T) -> bool:
         """
         Check if an entity is relevant to the current scanning context.
-        
-        This method should be overridden by subclasses to implement
-        entity-specific context filtering.
         
         Args:
             entity: Entity to check
             
         Returns:
-            True if entity is relevant to the current context, False otherwise
+            True if the entity is relevant, False otherwise
         """
-        # By default, all entities are relevant
-        # Subclasses should override this method to implement specific filtering
+        # Default implementation - all entities are relevant
         return True
-
-    async def _validate_entity_references(self, session: AsyncSession, entity: T, file_path: str) -> List[Dict[str, str]]:
+        
+    async def _validate_entity_references(self, session: AsyncSession, entity: EntityBase, file_path: str) -> List[Dict[str, str]]:
         """
         Validate references to other entities.
         
@@ -398,7 +315,7 @@ class EntityScanner(Generic[T]):
         """
         # Default implementation - subclasses should override for entity-specific validation
         return []
-
+                    
 
 class ProjectScanner(EntityScanner):
     """
@@ -476,6 +393,14 @@ class ProjectScanner(EntityScanner):
                 "validation_errors": len(validation_errors) if validation_errors else 0
             }
 
+    async def _validate_entity_references(self, session: AsyncSession, entity: T, file_path: str) -> List[Dict[str, str]]:
+        """
+        Validate references to other entities.
+        
+        For projects, there are no references to validate.
+        """
+        return []
+
 
 class DatasetScanner(EntityScanner):
     """
@@ -506,7 +431,7 @@ class DatasetScanner(EntityScanner):
     
     async def _validate_entity_references(self, session: AsyncSession, entity: T, file_path: str) -> List[Dict[str, str]]:
         """
-        Validate references to other entities.
+        Log entity references - actual validation is handled by foreign keys.
         
         Args:
             session: Database session
@@ -514,40 +439,19 @@ class DatasetScanner(EntityScanner):
             file_path: Path to the entity file
             
         Returns:
-            List of validation errors, empty if no errors
+            Empty list as we rely on foreign keys for validation
         """
-        from mlpie.db.crud.environment import get_environment_by_name
-        from mlpie.db.crud.project import get_project_by_name
-        
-        errors = []
         rel_path = os.path.relpath(file_path, self.repo_path)
         
-        # Validate required environment reference
-        if hasattr(entity, 'environment_name') and entity.environment_name:
-            environment = await get_environment_by_name(session, entity.environment_name)
-            if not environment:
-                errors.append({
-                    "error": "invalid_environment_ref", 
-                    "message": f"Dataset references non-existent environment '{entity.environment_name}'"
-                })
-                logger.warning(f"Dataset in {rel_path} references non-existent environment '{entity.environment_name}'")
-        else:
-            errors.append({
-                "error": "missing_environment_ref", 
-                "message": "Dataset requires environmentRef.name field"
-            })
+        # Just log the entity references
+        if hasattr(entity, 'environment_name'):
+            logger.debug(f"Dataset in {rel_path} references environment '{entity.environment_name}'")
         
-        # Validate optional project reference
         if hasattr(entity, 'project_name') and entity.project_name:
-            project = await get_project_by_name(session, entity.project_name)
-            if not project:
-                errors.append({
-                    "error": "invalid_project_ref", 
-                    "message": f"Dataset references non-existent project '{entity.project_name}'"
-                })
-                logger.warning(f"Dataset in {rel_path} references non-existent project '{entity.project_name}'")
+            logger.debug(f"Dataset in {rel_path} references project '{entity.project_name}'")
         
-        return errors
+        # Return empty list as we rely on foreign keys
+        return []
     
     async def reconcile_entities(self, 
                                 session: AsyncSession, 
@@ -630,7 +534,7 @@ class PipelineScanner(EntityScanner):
     
     async def _validate_entity_references(self, session: AsyncSession, entity: T, file_path: str) -> List[Dict[str, str]]:
         """
-        Validate references to other entities.
+        Log entity references - actual validation is handled by foreign keys.
         
         Args:
             session: Database session
@@ -638,40 +542,19 @@ class PipelineScanner(EntityScanner):
             file_path: Path to the entity file
             
         Returns:
-            List of validation errors, empty if no errors
+            Empty list as we rely on foreign keys for validation
         """
-        from mlpie.db.crud.environment import get_environment_by_name
-        from mlpie.db.crud.project import get_project_by_name
-        
-        errors = []
         rel_path = os.path.relpath(file_path, self.repo_path)
         
-        # Validate required environment reference
-        if hasattr(entity, 'environment_name') and entity.environment_name:
-            environment = await get_environment_by_name(session, entity.environment_name)
-            if not environment:
-                errors.append({
-                    "error": "invalid_environment_ref", 
-                    "message": f"Pipeline references non-existent environment '{entity.environment_name}'"
-                })
-                logger.warning(f"Pipeline in {rel_path} references non-existent environment '{entity.environment_name}'")
-        else:
-            errors.append({
-                "error": "missing_environment_ref", 
-                "message": "Pipeline requires environmentRef.name field"
-            })
+        # Just log the entity references
+        if hasattr(entity, 'environment_name'):
+            logger.debug(f"Pipeline in {rel_path} references environment '{entity.environment_name}'")
         
-        # Validate optional project reference
         if hasattr(entity, 'project_name') and entity.project_name:
-            project = await get_project_by_name(session, entity.project_name)
-            if not project:
-                errors.append({
-                    "error": "invalid_project_ref", 
-                    "message": f"Pipeline references non-existent project '{entity.project_name}'"
-                })
-                logger.warning(f"Pipeline in {rel_path} references non-existent project '{entity.project_name}'")
+            logger.debug(f"Pipeline in {rel_path} references project '{entity.project_name}'")
         
-        return errors
+        # Return empty list as we rely on foreign keys
+        return []
         
     async def reconcile_entities(self, 
                                 session: AsyncSession, 
@@ -751,6 +634,27 @@ class EnvironmentScanner(EntityScanner):
             True if this is an environment, False otherwise
         """
         return kind and kind.lower() == "environment"
+    
+    async def _validate_entity_references(self, session: AsyncSession, entity: T, file_path: str) -> List[Dict[str, str]]:
+        """
+        Log entity references - actual validation is handled by foreign keys.
+        
+        Args:
+            session: Database session
+            entity: Entity to validate
+            file_path: Path to the entity file
+            
+        Returns:
+            Empty list as we rely on foreign keys for validation
+        """
+        rel_path = os.path.relpath(file_path, self.repo_path)
+        
+        # Just log the entity references
+        if hasattr(entity, 'project_name') and entity.project_name:
+            logger.debug(f"Environment in {rel_path} references project '{entity.project_name}'")
+        
+        # Return empty list as we rely on foreign keys
+        return []
     
     async def reconcile_entities(self, 
                                 session: AsyncSession, 

@@ -11,6 +11,7 @@ from uuid import uuid4
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.schema import UniqueConstraint
 
 from mlpie.db.base import Base
 from mlpie.db.models.repository import EntityType, Repository
@@ -24,19 +25,22 @@ from mlpie.profilers.config import (
 
 class Environment(Base):
     __tablename__ = "environments"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        UniqueConstraint('project_name', 'name', name='uq_project_environment_name'),
+        {"extend_existing": True}
+    )
 
     # Core identity fields
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    name = Column(String(255), nullable=False, index=True, unique=True)
+    name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
     version = Column(String(50), nullable=True)
 
     # Full specification as JSON (K8s-like pattern)
     spec = Column(JSON, nullable=False, default={})
 
-    # Project relationship (optional)
-    project_name = Column(String(255), ForeignKey("projects.name"), nullable=True)
+    # Project relationship (REQUIRED)
+    project_name = Column(String(255), ForeignKey("projects.name"), nullable=False)
     project = relationship("Project", back_populates="environments")
     
     # Jobs relationship
@@ -127,9 +131,6 @@ class Environment(Base):
             
         Returns:
             Environment: A new Environment instance
-            
-        Raises:
-            ValueError: If required fields are missing
         """
         # Extract core fields from spec
         metadata = spec_dict.get("metadata", {})
@@ -137,8 +138,6 @@ class Environment(Base):
         
         # Get name from either root level or metadata
         name = spec_dict.get("name") or metadata.get("name")
-        if not name:
-            raise ValueError("Environment name is required")
         
         # Create instance
         environment = cls(
@@ -153,9 +152,16 @@ class Environment(Base):
         )
         
         # Handle project reference
-        project_ref = spec.get("projectRef")
-        if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
-            environment.project_name = project_ref.get("name")
+        # Support both "project" field (newer style) and "projectRef" field (older K8s style)
+        project_name = spec.get("project")
+        
+        if not project_name:
+            # Try K8s-style reference
+            project_ref = spec.get("projectRef")
+            if project_ref and isinstance(project_ref, dict) and project_ref.get("name"):
+                project_name = project_ref.get("name")
+        
+        environment.project_name = project_name
         
         # Handle repositories
         repo_spec = spec.get("repository")
@@ -179,5 +185,5 @@ class Environment(Base):
                         entity_id=str(environment.id)
                     )
                     environment.repositories.append(repo)
-            
+        
         return environment 
