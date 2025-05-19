@@ -91,6 +91,26 @@ class Project(Base):
         """Get repositories that manage a specific resource type."""
         return [repo for repo in self.repositories if repo.manages_resource_type(resource_type)]
     
+    def get_repository_url(self) -> str:
+        """Get the main repository URL for this project.
+        
+        Returns:
+            str: Repository URL or empty string if no repositories
+        """
+        if self.repositories and len(self.repositories) > 0:
+            return self.repositories[0].url
+        return ""
+    
+    def get_repository_branch(self) -> str:
+        """Get the main repository branch for this project.
+        
+        Returns:
+            str: Repository branch or "main" if no repositories
+        """
+        if self.repositories and len(self.repositories) > 0:
+            return self.repositories[0].ref
+        return "main"
+    
     @classmethod
     def from_yaml_spec(cls, spec_dict: Dict[str, Any], source_path: Optional[str] = None) -> 'Project':
         """

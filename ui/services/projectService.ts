@@ -14,22 +14,25 @@ interface ProjectFromAPI {
   name: string;
   description: string;
   status: string;
+  repository_url: string; // Added to match backend ProjectResponse
+  branch: string; // Added to match backend ProjectResponse
+  updated_at: string; // Added to match backend ProjectResponse
   // Any other fields that might come from the backend but are not used in the UI directly
 }
 
 export const projectService = {
   getProjects: async (): Promise<Project[]> => {
-    // Placeholder for the actual API endpoint
     const projectsFromAPI = await apiClient<ProjectFromAPI[]>(
       "/api/v1/projects"
     );
 
-    // Map API response to the Project interface, adding dummy data
     return projectsFromAPI.map((project) => ({
-      ...project,
-      models: Math.floor(Math.random() * 5) + 1, // Random number of models (1-5)
-      datasets: Math.floor(Math.random() * 5) + 1, // Random number of datasets (1-5)
-      updated: `Updated ${Math.floor(Math.random() * 24) + 1} hours ago`, // Random update time
+      name: project.name,
+      description: project.description,
+      status: project.status,
+      models: Math.floor(Math.random() * 5) + 1,
+      datasets: Math.floor(Math.random() * 5) + 1,
+      updated: new Date(project.updated_at).toLocaleDateString(), // Use updated_at from API
     }));
   },
 };

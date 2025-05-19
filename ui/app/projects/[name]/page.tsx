@@ -9,6 +9,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProjectSecrets } from '@/hooks/useProjectSecrets';
 import { secretsService, SecretKeyValue } from '@/services/secretsService';
+import { environmentService, Environment as EnvironmentServiceEnvironment } from '@/services/environmentService';
 import { toast } from "sonner";
 
 // Define GitRepository Type with name
@@ -22,14 +23,20 @@ type GitRepository = {
 };
 
 // Define Environment Type clearly at the top level
-type Environment = {
-  id: string;
-  name: string;
-  status: string;
-  deployedVersion: string;
-  cluster: string;
-  lastDeployed: string;
-};
+// This type is used for the form and initial data, now aligned with what environmentService returns
+type Environment = EnvironmentServiceEnvironment; // Use the type from environmentService
+
+// Matches the backend Pydantic schema EnvironmentResponse - This can be removed if not used elsewhere directly
+// type EnvironmentResponse = {
+//   id: string; 
+//   name: string;
+//   project_name: string;
+//   status: string;
+//   version?: string | null; 
+//   updated_at: string; 
+//   created_at: string; 
+//   description?: string | null;
+// };
 
 type ProjectDataset = {
   id: string;
@@ -66,7 +73,7 @@ type Project = {
 const initialProjects: Project[] = [
   {
     id: 1,
-    name: "sample-ml-project",
+    name: "project1",
     description: "Machine learning model to predict customer churn based on behavioral data and service usage patterns.",
     lastUpdated: "2 hours ago",
     status: "Active",
@@ -214,20 +221,48 @@ export default function ProjectDetailPage() {
   // Effect to initialize states
   useEffect(() => {
     if (initialProjectData) {
-      setEnvironments(initialProjectData.environments);
+      // setEnvironments(initialProjectData.environments); // Will be replaced by API call
       setGitRepos(initialProjectData.gitRepos);
       
       // Update the global context with this project
       setSelectedProject(initialProjectData);
       
-      // If there are environments, select the first one by default
-      if (initialProjectData.environments.length > 0) {
-        setSelectedEnvironment(initialProjectData.environments[0]);
-      } else {
-        setSelectedEnvironment(null);
-      }
+      // Fetch environments from the backend
+      const fetchEnvironments = async () => {
+        if (!projectNameSlug) return;
+        try {
+          const fetchedEnvironments = await environmentService.getProjectEnvironments(projectNameSlug); // Use new service
+          
+          // Transformation is now handled within the service, but we need to ensure the `cluster` prop for the modal
+          const environmentsForState: Environment[] = fetchedEnvironments.map(env => ({
+            ...env,
+            cluster: env.cluster || '' // Ensure cluster is present for modal form, even if empty
+          }));
+
+          setEnvironments(environmentsForState);
+
+          if (environmentsForState.length > 0) {
+            setSelectedEnvironment(environmentsForState[0]);
+          } else {
+            setSelectedEnvironment(null);
+          }
+        } catch (error) {
+          console.error("Error fetching environments:", error);
+          toast.error("Failed to load project environments.");
+          // Fallback to initial/empty data if needed, or handle error display
+          setEnvironments(initialProjectData.environments); // Or an empty array: []
+           if (initialProjectData.environments.length > 0) {
+            setSelectedEnvironment(initialProjectData.environments[0]);
+          } else {
+            setSelectedEnvironment(null);
+          }
+        }
+      };
+
+      fetchEnvironments();
+
     }
-  }, [initialProjectData, setSelectedProject, setSelectedEnvironment]);
+  }, [initialProjectData, setSelectedProject, setSelectedEnvironment, projectNameSlug]);
 
   // Effect for closing context menu on outside click
   useEffect(() => {
@@ -248,7 +283,7 @@ export default function ProjectDetailPage() {
     if (env) {
       setEnvId(env.id);
       setEnvName(env.name);
-      setEnvCluster(env.cluster);
+      setEnvCluster(env.cluster || ''); // Ensure env.cluster is accessed safely
     } else {
       setEnvId('');
       setEnvName('');
@@ -267,17 +302,18 @@ export default function ProjectDetailPage() {
 
   const handleSaveEnvironment = (formData: FormData) => {
     const name = formData.name as string;
-    const cluster = formData.cluster as string;
+    // const cluster = formData.cluster as string; // Cluster is not part of the main Environment data anymore for display
+    const clusterFromForm = formData.cluster as string; // Still needed for the form submission logic
     
-    if (!name || !cluster) {
+    if (!name || !clusterFromForm) {
         alert("Environment Name and Cluster are required.");
         return; 
     }
 
     const newEnvData: Omit<Environment, 'status' | 'deployedVersion' | 'lastDeployed'> = {
-        id: currentEnvironment ? envId : `env-${Date.now()}`, 
+        id: currentEnvironment ? envId : `env-${Date.now()}`,
         name: name,
-        cluster: cluster,
+        cluster: clusterFromForm, // Use cluster from form for creation/update logic
     };
 
     if (currentEnvironment) {
@@ -744,7 +780,7 @@ export default function ProjectDetailPage() {
                 <thead className="bg-secondary/50">
                   <tr>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-left">Name</th>
-                    <th className="px-4 py-3 font-medium text-muted-foreground text-left">Cluster</th>
+                    {/* <th className="px-4 py-3 font-medium text-muted-foreground text-left">Cluster</th> */}
                     <th className="px-4 py-3 font-medium text-muted-foreground text-left">Status</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-left">Deployed Version</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-left">Last Deployed</th>
@@ -760,7 +796,7 @@ export default function ProjectDetailPage() {
                             {env.name}
                           </Link>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{env.cluster}</td>
+                        {/* <td className="px-4 py-3 text-muted-foreground">{env.cluster}</td> */}
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(env.status)}`}>
                             {env.status}
@@ -790,7 +826,7 @@ export default function ProjectDetailPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={6} className="text-center py-6 text-muted-foreground italic">
+                      <td colSpan={5} className="text-center py-6 text-muted-foreground italic">
                         No environments configured for this project yet.
                       </td>
                     </tr>
